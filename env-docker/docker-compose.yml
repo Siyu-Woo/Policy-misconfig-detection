@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  openstack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openstack-policy-detection
+    hostname: openstack
+    # 使用桥接网络
+    network_mode: "bridge"
+    # 暴露端口
+    ports:
+      - "5000:5000"  # Keystone
+      - "8774:8774"  # Nova
+      - "8778:8778"  # Placement
+      - "9292:9292"  # Glance
+      - "9696:9696"  # Neutron
+      - "8776:8776"  # Cinder
+      - "80:80"      # Horizon
+    privileged: true
+    # 设置环境变量
+    environment:
+      - TZ=UTC
+    # 设置DNS
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    # 卷挂载配置
+    volumes:
+      # 挂载Doctor组件相关文件
+      - ./doctor:/opt/stack/keystone/keystone/cmd/doctor
+      # 挂载策略文件
+      - ../data/policy file:/etc/keystone/policy.yaml
+      # 挂载服务状态
+      - ./server state:/var/lib/openstack/state
+      # 挂载环境信息
+      - ./envinfo:/opt/openstack/envinfo
+    # 重启策略
+    restart: unless-stopped
+    # 启动命令
+    command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/openstack.conf"]

@@ -1,0 +1,78 @@
+# Default Keystone policy
+# This is a basic policy file with some examples.
+
+"admin_required": "role:admin or is_admin:1"
+"service_role": "role:service"
+"service_or_admin": "rule:admin_required or rule:service_role"
+"owner": "user_id:%(user_id)s or user_id:%(target.token.user_id)s"
+"admin_or_owner": "rule:admin_required or rule:owner"
+"token_subject": "user_id:%(target.token.user_id)s"
+"admin_or_token_subject": "rule:admin_required or rule:token_subject"
+
+# Default policies for identity operations
+identity:get_region: "rule:admin_required"
+identity:list_regions: "rule:admin_required"
+identity:create_region: "rule:admin_required"
+identity:update_region: "rule:admin_required"
+identity:delete_region: "rule:admin_required"
+
+identity:get_service: "rule:admin_required"
+identity:list_services: "rule:admin_required"
+identity:create_service: "rule:admin_required"
+identity:update_service: "rule:admin_required"
+identity:delete_service: "rule:admin_required"
+
+identity:get_endpoint: "rule:admin_required"
+identity:list_endpoints: "rule:admin_required"
+identity:create_endpoint: "rule:admin_required"
+identity:update_endpoint: "rule:admin_required"
+identity:delete_endpoint: "rule:admin_required"
+
+# Default policies for user operations
+identity:get_user: "rule:admin_or_owner"
+identity:list_users: "rule:admin_required"
+identity:create_user: "rule:admin_required"
+identity:update_user: "rule:admin_required"
+identity:delete_user: "rule:admin_required"
+identity:change_password: "rule:admin_or_owner"
+
+# Default policies for group operations
+identity:get_group: "rule:admin_required"
+identity:list_groups: "rule:admin_required"
+identity:list_users_in_group: "rule:admin_required"
+identity:create_group: "rule:admin_required"
+identity:update_group: "rule:admin_required"
+identity:delete_group: "rule:admin_required"
+identity:add_user_to_group: "rule:admin_required"
+identity:remove_user_from_group: "rule:admin_required"
+
+# Default policies for project operations
+identity:get_project: "rule:admin_required or project_id:%(target.project.id)s"
+identity:list_projects: "rule:admin_required"
+identity:list_user_projects: "rule:admin_or_owner"
+identity:create_project: "rule:admin_required"
+identity:update_project: "rule:admin_required"
+identity:delete_project: "rule:admin_required"
+
+# Default policies for role operations
+identity:get_role: "rule:admin_required"
+identity:list_roles: "rule:admin_required"
+identity:create_role: "rule:admin_required"
+identity:update_role: "rule:admin_required"
+identity:delete_role: "rule:admin_required"
+identity:list_role_assignments: "rule:admin_required"
+
+# Default policies for token operations
+identity:check_token: "rule:admin_required or rule:token_subject"
+identity:validate_token: "rule:service_or_admin"
+identity:validate_token_head: "rule:service_or_admin"
+identity:revocation_list: "rule:service_or_admin"
+identity:revoke_token: "rule:admin_or_token_subject"
+
+# Default policies for policy operations
+identity:check_policy: "rule:admin_or_owner"
+identity:get_policy: "rule:admin_required"
+identity:list_policies: "rule:admin_required"
+identity:create_policy: "rule:admin_required"
+identity:update_policy: "rule:admin_required"
+identity:delete_policy: "rule:admin_required"
