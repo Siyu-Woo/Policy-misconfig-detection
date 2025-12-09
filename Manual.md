@@ -15,6 +15,12 @@
    ```
 
 3. 启动容器（推荐使用优化后的挂载配置）：
+  **如果非首次启动容器**
+   ```bash
+   docker start openstack-policy-detection
+   '''
+  
+  **首次启动容器**
    ```bash
    docker run -d --name openstack-policy-detection \
      -p 5000:5000 -p 8774:8774 -p 8778:8778 -p 9292:9292 \
@@ -168,6 +174,81 @@ docker exec -it openstack-policy-detection bash
   - Cinder配置：`/etc/cinder/`
   - Horizon配置：`/etc/openstack-dashboard/`
 
+## Neo4j图数据库
+
+### Neo4j服务管理
+
+1. **检查Neo4j状态**：
+   ```bash
+   neo4j status
+   ```
+
+2. **启动Neo4j服务**：
+   ```bash
+   neo4j start
+   ```
+
+3. **停止Neo4j服务**：
+   ```bash
+   neo4j stop
+   ```
+
+4. **重启Neo4j服务**：
+   ```bash
+   neo4j restart
+   ```
+
+### Neo4j连接信息
+
+- **HTTP接口**: http://localhost:7474
+- **Bolt协议端口**: 7687
+- **用户名**: neo4j
+- **密码**: Password
+
+### Neo4j使用方式
+
+1. **Web界面访问**：
+   - 在浏览器中打开: http://localhost:7474
+   - 使用用户名`neo4j`和密码`Password`登录
+
+2. **命令行访问**：
+   ```bash
+   cypher-shell -u neo4j -p Password
+   ```
+
+3. **基本查询示例**：
+   ```bash
+   # 查询节点总数
+   cypher-shell -u neo4j -p Password "MATCH (n) RETURN count(n) as node_count;"
+   
+   # 查询数据库信息
+   cypher-shell -u neo4j -p Password "CALL db.info();"
+   
+   # 查询所有标签
+   cypher-shell -u neo4j -p Password "CALL db.labels();"
+   ```
+
+4. **Python连接示例**：
+   ```python
+   from neo4j import GraphDatabase
+   
+   driver = GraphDatabase.driver("bolt://localhost:7687", 
+                                auth=("neo4j", "Password"))
+   
+   with driver.session() as session:
+       result = session.run("MATCH (n) RETURN count(n) as count")
+       print(result.single()["count"])
+   
+   driver.close()
+   ```
+
+### Neo4j数据库状态
+
+- **数据库ID**: 67BC46AAA0BFF16C2ADFB7D70D42C6744B1FAC79EB65DA1ADD819BC3E850FA4C
+- **数据库名称**: neo4j
+- **创建时间**: 2025-08-07T09:46:37.279Z
+- **当前节点数**: 70个节点
+
 ## 注意事项
 
 1. **配置文件修改**：如果调整或补充挂载文件，更新、新增、删减用户，调整密码等、调整端口等信息，需要同步更新上述基本信息serverinfo.md。
@@ -176,6 +257,8 @@ docker exec -it openstack-policy-detection bash
 
 3. **策略文件**：当前Keystone使用的策略文件位于`/etc/keystone/policy.yaml/policy.yaml`，而不是直接位于`/etc/keystone/policy.yaml`。这是因为挂载配置的特殊性，在代码中需要注意这一点。
 
-4. **Nova API僵尸进程**：当前Nova API存在一些僵尸进程，这可能是由于服务配置问题导致的。如果影响使用，可能需要进一步调查和修复。
+4. **Nova API僵尸进程**：~~当前Nova API存在一些僵尸进程，这可能是由于服务配置问题导致的。如果影响使用，可能需要进一步调查和修复。~~ ✅ 已解决
 
-5. **Apache重启**：Apache服务重启可能会失败，但服务实际上仍在运行。如果需要重启Apache，可能需要先停止服务，然后再启动。
+5. **Apache重启**：Apache服务重启可能会失败，但服务实际上仍在运行。如果需要重启Apache，可能需要先停止服务，然后再启动。这是容器环境的正常行为。
+
+6. **Neo4j图数据库**：Neo4j服务已启动并运行正常，可用于构建OpenStack权限关系图谱和策略分析。
