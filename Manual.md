@@ -249,6 +249,30 @@ docker exec -it openstack-policy-detection bash
 - **创建时间**: 2025-08-07T09:46:37.279Z
 - **当前节点数**: 70个节点
 
+## fileparser目录脚本说明
+
+`fileparser/` 目录提供了策略解析、API 抽取、策略与 API 匹配以及知识图谱生成的全部脚本，可配合上面的 Neo4j 环境直接运行。
+
+- **策略解析链路**  
+  - `policypreprocess.py`：读取原始策略 YAML/行文本、展开 `rule:` 引用并输出标准字典。  
+  - `policy_parser.py`：依赖 `oslo.policy` 和 `keystone.cmd.doctor` 内置数据库，将策略表达式转换为 DNF，并可写入本地策略数据库。  
+  - 针对各组件的策略爬虫（`cinderpolicy.py`、`glancepolicy.py`、`neutronpolicy.py`、`nova_policy.py`、`keystonepolicy.py`）会从 docs.openstack.org 拉取策略文档，生成包含 Default/Operations/描述的 Excel，便于后续处理。
+
+- **API 抽取与匹配**  
+  - `cinderapi.py`、`glanceapi.py`、`neutronapi.py`、`novaapi.py`、`keystoneapi.py` 使用 `requests + BeautifulSoup + pandas` 抓取官方 API Reference，并将 HTTP 方法与 URL 导出为 Excel。  
+  - `cindermerge.py`、`glancemerge.py`、`neutronmerge.py`、`novamerge.py`、`keystonemerge.py` 将前一步 API 表与策略 Operations 对齐，输出“已匹配”“未匹配 API”“未匹配策略”三类结果，同时用 `openpyxl` 美化单元格，方便快速排查缺失策略。
+
+- **知识图谱构建**  
+  - `openstackgraph.py`：通过 `keystoneauth1` / `python-keystoneclient` 读取当前环境中的用户、项目、角色等关系，并借助 `neo4j` 驱动把节点关系写入 Neo4j。脚本内的 `OS_CONFIG` 和 `NEO4J_*` 常量可按需要修改，还提供清理测试数据、生成示例数据和推送写入的完整流程。  
+  - `openstackpolicygraph.py`：`PolicyGraphCreator` 根据策略字典（可直接来自 `policy_parser` 或前述 Excel）生成策略节点及条件节点，自动去重、归一化表达式并写入 Neo4j，可作为策略知识图谱的落地脚本。
+
+- **依赖安装**  
+  上述脚本需要额外的 Python 库，请在容器内（或虚拟环境中）安装：
+  ```bash
+  pip install requests beautifulsoup4 pandas openpyxl pyyaml oslo.policy keystoneauth1 python-keystoneclient neo4j
+  ```
+  （如果使用 `policypreprocess.py` 的 `policy_split` 辅助函数，请同时确保该模块已放入 `PYTHONPATH`。）
+
 ## 注意事项
 
 1. **配置文件修改**：如果调整或补充挂载文件，更新、新增、删减用户，调整密码等、调整端口等信息，需要同步更新上述基本信息serverinfo.md。
