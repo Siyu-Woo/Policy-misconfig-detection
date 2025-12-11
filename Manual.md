@@ -43,8 +43,6 @@
 | `/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/logs` | `/var/log/neo4j` | Neo4j 日志持久化 |
 | `/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/fileparser` | `/root/policy-fileparser` | 策略/身份解析与图谱脚本（`run_graph_pipeline.py`、`openstackpolicygraph.py` 等） |
 
-> 说明：由于 GitHub 100 MB 文件限制，`data/neo4j/data/` 目录下的 Neo4j 数据库文件未提交至远程仓库，需要迁移/拉取后手动同步该目录（包含 `data`、`transactions`、`databases` 等子目录）。
-
 ### 服务信息查询和存储位置
 - **服务器信息/凭证**：`env-docker/envinfo/serverinfo.md`、`env-docker/envinfo/admin-openrc.sh`（挂载到容器 `/opt/openstack/envinfo/`）提供系统用户、项目、角色、端点以及 OpenStack CLI 凭证。
 - **服务状态/数据库**：`env-docker/server state/databases/`（容器 `/var/lib/openstack/state/databases/`）包含 `nova.sqlite`、`nova_api.sqlite`、`placement.sqlite`、`neutron.sqlite`、`cinder.sqlite` 等 SQLite 数据库，实现服务状态持久化。
