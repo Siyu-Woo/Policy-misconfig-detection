@@ -1,0 +1,3 @@
+"identity:create_user": "role:admin"
+"compute:stop_server": "rule:commmon_member"
+"commmon_member": "role:member or role:admin"

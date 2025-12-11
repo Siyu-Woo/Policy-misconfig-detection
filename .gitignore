@@ -47,6 +47,8 @@ logs/
 env-docker/server\ state/
 *.sqlite
 *.db
+data/neo4j/data/
+data/neo4j/logs/
 
 # Environment specific
 .env

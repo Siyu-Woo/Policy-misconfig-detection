@@ -121,9 +121,10 @@ class PolicyGraphCreator:
         Returns:
             str: Neo4j节点标签
         """
-        # 将类型转换为驼峰命名的标签
-        parts = condition_type.split('_')
-        label = ''.join(word.capitalize() for word in parts)
+        # Neo4j 标签不能包含特殊字符（如 '.'），统一做清洗
+        sanitized = re.sub(r'[^0-9a-zA-Z]+', ' ', condition_type)
+        parts = [word for word in sanitized.strip().split() if word]
+        label = ''.join(word.capitalize() for word in parts) or 'Generic'
         return f"{label}Condition"
     
     def create_policy_graph(self, policy_dict: Dict[str, List[str]]):
@@ -233,7 +234,10 @@ class PolicyGraphCreator:
                                 print(f"    创建条件节点 [{node_label}]: {node_name}")
                             
                             # 创建从规则到条件节点的关系
-                            relationship_name = f"REQUIRES_{node_type.upper()}"
+                            rel_key = re.sub(r'[^0-9a-zA-Z]+', '_', node_type).upper()
+                            if not rel_key:
+                                rel_key = "GENERIC"
+                            relationship_name = f"REQUIRES_{rel_key}"
                             session.run(
                                 f"""
                                 MATCH (rule:RuleNode {{id: $rule_id}})
