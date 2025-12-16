@@ -1,7 +1,9 @@
 from neo4j import GraphDatabase
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Any
 import re
 import hashlib
+
+from output_control import general_print as print
 
 class PolicyGraphCreator:
     def __init__(self, uri: str, user: str, password: str):
@@ -127,12 +129,12 @@ class PolicyGraphCreator:
         label = ''.join(word.capitalize() for word in parts) or 'Generic'
         return f"{label}Condition"
     
-    def create_policy_graph(self, policy_dict: Dict[str, List[str]]):
+    def create_policy_graph(self, policy_dict: Dict[str, Dict[str, Any]]):
         """
         根据策略字典创建Neo4j图
         
         Args:
-            policy_dict: 策略字典，key为策略名，value为规则列表
+            policy_dict: 策略字典，key为策略名，value包含规则列表与元信息
         """
         with self.driver.session() as session:
             self.rule_counter = 0
@@ -145,7 +147,9 @@ class PolicyGraphCreator:
             # 统计重复规则
             rule_usage_count = {}
             
-            for policy_key, rules in policy_dict.items():
+            for policy_key, policy_entry in policy_dict.items():
+                rules = policy_entry.get('expressions', [])
+                metadata = policy_entry.get('metadata', {})
                 # 解析根节点（策略节点）
                 root_type, root_name = self.parse_node_from_string(policy_key)
                 
@@ -156,22 +160,29 @@ class PolicyGraphCreator:
                 # 创建根节点（策略节点）
                 root_label = self.get_condition_label(root_type).replace('Condition', 'Policy')
                 root_node_id = f"{root_type}:{root_name}"
+                policy_file = metadata.get('file')
+                policy_lines = metadata.get('lines', [])
                 
-                if root_node_id not in created_nodes_by_type.get(root_type, set()):
-                    session.run(
-                        f"""
-                        MERGE (n:PolicyNode:{root_label} {{
-                            id: $id, 
-                            type: $type, 
-                            name: $name
-                        }})
-                        """,
-                        id=root_node_id,
-                        type=root_type,
-                        name=root_name
-                    )
-                    if root_type not in created_nodes_by_type:
-                        created_nodes_by_type[root_type] = set()
+                session.run(
+                    f"""
+                    MERGE (n:PolicyNode:{root_label} {{
+                        id: $id, 
+                        type: $type, 
+                        name: $name
+                    }})
+                    SET n.policyfile = $policy_file,
+                        n.policyline = $policy_lines
+                    """,
+                    id=root_node_id,
+                    type=root_type,
+                    name=root_name,
+                    policy_file=policy_file,
+                    policy_lines=policy_lines
+                )
+                
+                if root_type not in created_nodes_by_type:
+                    created_nodes_by_type[root_type] = set()
+                if root_node_id not in created_nodes_by_type[root_type]:
                     created_nodes_by_type[root_type].add(root_node_id)
                     print(f"创建策略节点 [{root_label}]: {root_name}")
                 
@@ -348,31 +359,49 @@ class PolicyGraphCreator:
 def main():
     # 示例策略字典 - 包含重复的规则
     policy_dict = {
-        'identity:get_application_credential': [
-            'role:reader and system_scope:all',
-            'user_id:%(user_id)s'
-        ],
-        'identity:list_application_credentials': [
-            'role:reader and system_scope:all',  # 与上面的规则相同
-            'user_id:%(user_id)s'  # 与上面的规则相同
-        ],
-        'identity:create_user': [
-            'role:admin and system_scope:all',
-            'role:admin and domain_id:%(target.domain.id)s'
-        ],
-        'identity:update_user': [
-            'role:admin and system_scope:all',  # 与create_user的第一个规则相同
-            'role:admin and domain_id:%(target.domain.id)s',  # 与create_user的第二个规则相同
-            'user_id:%(user_id)s and user_id:%(target.user.id)s'
-        ],
-        'identity:delete_user': [
-            'role:admin and system_scope:all',  # 再次重复
-            'role:admin and domain_id:%(target.domain.id)s'  # 再次重复
-        ],
-        'identity:create_instance': [
-            'role:admin or role:member',
-            'project_id:%(target.project.id)s'
-        ]
+        'identity:get_application_credential': {
+            'expressions': [
+                'role:reader and system_scope:all',
+                'user_id:%(user_id)s'
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [1, 2]}
+        },
+        'identity:list_application_credentials': {
+            'expressions': [
+                'role:reader and system_scope:all',  # 与上面的规则相同
+                'user_id:%(user_id)s'  # 与上面的规则相同
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [5, 6]}
+        },
+        'identity:create_user': {
+            'expressions': [
+                'role:admin and system_scope:all',
+                'role:admin and domain_id:%(target.domain.id)s'
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [10, 11]}
+        },
+        'identity:update_user': {
+            'expressions': [
+                'role:admin and system_scope:all',  # 与create_user的第一个规则相同
+                'role:admin and domain_id:%(target.domain.id)s',  # 与create_user的第二个规则相同
+                'user_id:%(user_id)s and user_id:%(target.user.id)s'
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [15, 16, 17]}
+        },
+        'identity:delete_user': {
+            'expressions': [
+                'role:admin and system_scope:all',  # 再次重复
+                'role:admin and domain_id:%(target.domain.id)s'  # 再次重复
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [21, 22]}
+        },
+        'identity:create_instance': {
+            'expressions': [
+                'role:admin or role:member',
+                'project_id:%(target.project.id)s'
+            ],
+            'metadata': {'file': 'sample-policy.yaml', 'lines': [30, 31]}
+        }
     }
     
     # 创建Neo4j连接

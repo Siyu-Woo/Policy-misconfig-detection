@@ -1,157 +1,130 @@
-# OpenStack 策略解析与图谱构建模块说明文档
+# fileparser 模块说明
 
-本文档详细说明了 `fileparser` 目录下各核心脚本的功能、数据交互流程以及最终生成的 Neo4j 图数据库模型。该模块旨在将 OpenStack 的**静态策略配置**与**动态身份/资源状态**转化为统一的图谱结构，以便进行安全路径分析。
+本文档概述 `fileparser` 目录中与图构建相关的五个脚本：`policypreprocess.py`、`policy_parser.py`、`openstackpolicygraph.py`、`openstackgraph.py` 与 `run_graph_pipeline.py`，并整理它们的输入/输出、依赖关系、Neo4j 的数据结构以及策略文件路径。
 
-## 1. 图数据模型 (Graph Data Schema)
+## 1. 关键脚本的功能、输入与输出
 
-系统在 Neo4j 中构建的图谱包含两个主要子图：**策略定义子图（静态）**和**身份资源子图（动态/环境）**。
+### policypreprocess.py
+- **功能**：读取 OpenStack policy 文件，展开 `rule:<alias>` 引用，并记录每条策略在原始文件中的来源，以便后续图谱节点附带文件/行号信息。
+- **输入**：策略文件路径（YAML/行格式均可）。
+- **输出**：字典 `{policy_name: {"expression": expanded_expression, "file": path, "lines": [...]}}`，其中 `expression` 是展开后的逻辑串，`file` 记录文件路径，`lines` 记录策略在文件中的行号（可多行）。
 
-graph TD
-    %% 定义样式
-    classDef static fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef dynamic fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef link fill:#none,stroke:#4caf50,stroke-width:2px,stroke-dasharray: 5 5;
+### policy_parser.py
+- **功能**：使用 `oslo.policy` 解析器将字符串表达式转换为 AST，提取最小授权单元（近似 DNF），并可写入策略数据库。
+- **输入**：来自预处理模块的字典项（策略名 + 展开后的表达式）。
+- **输出**：每条策略的最小匹配单元 `List[Dict[str, List[str]]]`，字段限制于 `{domain, project, role, system_scope, user}`，可通过 `store_policy_to_database` 逐条落库。
 
-    subgraph "静态策略定义子图 (Static Policy Graph)"
-        PolicyNode("PolicyNode<br>(API动作: identity:list_users)"):::static
-        RuleNode("RuleNode<br>(逻辑表达式)"):::static
-        ConditionNode("ConditionNode<br>(原子条件: role:admin)"):::static
-        
-        PolicyNode -- "HAS_RULE" --> RuleNode
-        RuleNode -- "REQUIRES_{TYPE}" --> ConditionNode
-    end
+### openstackpolicygraph.py
+- **功能**：把解析后的策略结果写入 Neo4j，形成“策略子图”。自动复用重复规则节点，并为不同条件类型生成对应标签与 `REQUIRES_*` 关系。
+- **输入**：策略字典 `Dict[str, List[str]]`，每个值是该策略的规则表达式列表（来自 policy_parser 的结果或直接传入的字符串）。
+- **输出**：在 Neo4j 中创建 `PolicyNode`、`RuleNode`、`ConditionNode` 三类节点以及 `HAS_RULE`、`REQUIRES_*` 关系。`get_graph_statistics()` 可回读统计信息。
 
-    subgraph "动态身份资源子图 (Dynamic Identity Graph)"
-        User("User<br>(实际用户)"):::dynamic
-        Token("Token<br>(模拟/会话)"):::dynamic
-        Role("Role<br>(实际角色)"):::dynamic
-        
-        User -- "HAS_TOKEN" --> Token
-        Token -- "GRANTS" --> Role
-    end
+### openstackgraph.py
+- **功能**：使用 Keystone Admin API 读取当前 OpenStack 环境的用户、角色、项目及角色分配，基于 `role_assignments` 合成 Token 层（支持共享 / 独享 token），并把 system scope 也拆成节点写入 Neo4j，形成“身份子图”。提供清理、生成测试数据等附加能力。
+- **输入**：OpenStack 管理员凭据（在文件顶部 `OS_CONFIG` 配置）和 Neo4j 连接信息。
+- **输出**：`User`、`Token`、`Role`、`SystemScope` 节点，以及 `HAS_TOKEN`、`GRANTS`、`HAS_SYSTEM_SCOPE` 关系；控制台还会输出 token-role-scope 映射及共享统计。
 
-    %% 逻辑连接
-    ConditionNode -. "逻辑匹配 (Logical Match)" .-> Role
-    linkStyle 4 stroke:#4caf50,stroke-width:2px,fill:none;
+### run_graph_pipeline.py
+- **功能**：统一入口脚本，串联 CLI 调用、身份子图构建与策略子图构建，并内置策略重复检测模块。
+- **输入**：命令行参数（服务列表、策略文件路径、Neo4j 连接、是否跳过身份/策略阶段、输出控制开关等）。
+- **输出**：调用 OpenStack CLI 进行凭证检查；若未跳过则先执行 `openstackgraph` 写入身份子图，再调用 `policypreprocess + policy_parser + openstackpolicygraph` 写入策略子图；同时输出策略重复/冲突检测报告及统计信息（可通过命令行开关控制显示）。
+- **策略重复检查**：脚本在建图前会检测（1）同一个 API 是否被多条策略重复定义；（2）单个策略内部是否包含重复规则。若发现问题，会通过 `Tools/CheckOutput.py` 模块输出对应的错误码、问题策略以及合并建议，便于后续修订策略文件。
 
-### 1.1 策略定义子图 (Static Policy Graph)
-由 `openstackpolicygraph.py` 构建，描述 `policy.yaml` 中的规则逻辑。
+## 2. 文件之间的依赖关系
+1. `run_graph_pipeline.py` 调用 `policypreprocess.process_policy_file()` 读取并展开策略。
+2. 其结果被 `policy_parser.PolicyRuleParser` 读取：`extract_rule_definitions()` 先记录别名，再对非别名策略调用 `parse_single_policy()` 与 `_extract_minimal_units()`，生成多条逻辑表达式。
+3. `openstackpolicygraph.PolicyGraphCreator` 消耗这些表达式列表，构建策略子图。
+4. 同一脚本根据参数决定是否调用 `openstackgraph.OpenStackNeo4jManager`，读取实际用户/角色并生成身份子图。
+5. 两个子图写入的是同一个 Neo4j 实例，因此策略约束与真实身份可在后续查询中进行路径关联。`run_graph_pipeline.py` 即是整个流程的 orchestrator，其他脚本则是被动模块。
 
-* **节点 (Nodes)**
-    * **`PolicyNode`**: 代表具体的 API 策略动作。
-        * *Labels*: `:PolicyNode`, `:Policy{Type}` (如 `:PolicyIdentity`)
-        * *Properties*: `name` (如 "identity:list_users"), `type` ("identity")
-    * **`RuleNode`**: 代表策略背后的逻辑规则表达式。
-        * *Labels*: `:RuleNode`
-        * *Properties*: `expression` (原始表达式), `normalized_expression` (归一化表达式)
-    * **`ConditionNode`**: 代表规则中的最小原子条件。
-        * *Labels*: `:ConditionNode`, `:{Type}Condition` (如 `:RoleCondition`, `:SystemScopeCondition`)
-        * *Properties*: `type` (如 "role"), `name` (如 "admin", "reader")
+## 3. 图数据库中的数据结构与样例
+### 节点类型
+- `PolicyNode`：`{id: 'identity:list_users', type: 'identity', name: 'list_users', policyfile: '/etc/.../keystone-policy.yaml', policyline: [42]}`。
+- `RuleNode`：`{id: 'rule:rule12', name: 'rule12', expression: 'role:reader and system_scope:all', normalized_expression: 'role:reader and system_scope:all'}`。
+- `ConditionNode`：标签随条件类型变化（如 `RoleCondition`、`SystemScopeCondition`），属性 `{id: 'role:reader', type: 'role', name: 'reader'}`。
+- `User`：`{id: 'ad7d...', name: 'alice', email: 'alice@example.com'}`。
+- `Token`：`{id: '8c2f-uuid', shared: False}`；共享 token 会设置 `shared: True`，且可连接多个用户。
+- `Role`：`{id: '9b69...', name: 'member'}`。
+- `SystemScope`：`{name: 'all'}` 或 `{'name': 'domain'}` 等，表示 token 被授予的 system-level 作用域。
 
-* **关系 (Relationships)**
-    * `(:PolicyNode)-[:HAS_RULE]->(:RuleNode)`: 策略受限于某条规则。
-    * `(:RuleNode)-[:REQUIRES_{TYPE}]->(:ConditionNode)`: 规则的具体要求。
-        * 例如: `[:REQUIRES_ROLE]`, `[:REQUIRES_SYSTEM_SCOPE]`, `[:REQUIRES_PROJECT]`
+### 关系类型
+- `(:PolicyNode)-[:HAS_RULE]->(:RuleNode)`
+- `(:RuleNode)-[:REQUIRES_ROLE|REQUIRES_PROJECT|...]->(:ConditionNode)`
+- `(:User)-[:HAS_TOKEN]->(:Token)`
+- `(:Token)-[:GRANTS]->(:Role)`
+- `(:Token)-[:HAS_SYSTEM_SCOPE]->(:SystemScope)`
 
-### 1.2 身份资源子图 (Identity & Resource Graph)
-由 `openstackgraph.py` 构建，描述 OpenStack 环境中的实际用户、角色和模拟的令牌关系。
+### 样例结构
+```
+(:PolicyNode:PolicyIdentity {id: 'identity:list_users'})
+  -[:HAS_RULE]->(:RuleNode {id: 'rule:rule5'})
+    -[:REQUIRES_ROLE]->(:ConditionNode:RoleCondition {id: 'role:reader'})
+    -[:REQUIRES_SYSTEM_SCOPE]->(:ConditionNode:SystemScopeCondition {id: 'system_scope:all'})
+(:User {id: 'f3c...'})-[:HAS_TOKEN]->(:Token {id: '1a2b...', shared: false})
+  -[:GRANTS]->(:Role {id: 'd8e...', name: 'reader'})
+  -[:HAS_SYSTEM_SCOPE]->(:SystemScope {name: 'all'})
+```
+该样例展示了策略 list_users 对应的逻辑条件与某个真实用户通过 token 拥有 reader 角色，两条路径可在 Neo4j 中组合查询以验证访问链路。
 
-* **节点 (Nodes)**
-    * **`User`**: 实际存在的用户。
-        * *Properties*: `id`, `name`, `email`
-    * **`Role`**: 实际存在的角色。
-        * *Properties*: `id`, `name`
-    * **`Token`**: (模拟节点) 代表用户持有的访问令牌，用于连接用户与权限。
-        * *Properties*: `id` (UUID), `shared` (布尔值，表示是否为共享令牌)
+## 4. Policy 文件路径
+- `policypreprocess.process_policy_file()` 接受任意给定路径；`run_graph_pipeline.py` 的 `--policy-files` 参数默认值为 `/etc/openstack/policies/keystone-policy.yaml`，可通过逗号分隔传入多个策略文件。
+- 仓库内提供了示例 `fileparser/keystone-policy.yaml`，可直接用作本地调试或在 `--policy-files` 中引用（例如：`python run_graph_pipeline.py --policy-files ./fileparser/keystone-policy.yaml`）。
+- 若部署在容器中，请保证上述路径在容器的 `/etc/openstack/policies/` 下被挂载，或在运行脚本时传入真实的策略文件绝对路径。
 
-* **关系 (Relationships)**
-    * `(:User)-[:HAS_TOKEN]->(:Token)`: 用户拥有某个令牌。
-    * `(:Token)-[:GRANTS]->(:Role)`: 该令牌赋予了持有者特定的角色。
+## 5. 运行命令示例
+- **指定策略文件解析**  
+  在仓库根目录运行：  
+  ```bash
+  python fileparser/run_graph_pipeline.py \
+    --policy-files ./fileparser/keystone-policy.yaml \
+    --neo4j-uri bolt://localhost:7687 \
+    --neo4j-user neo4j \
+    --neo4j-password Password \
+    --skip-identity
+  ```  
+  其中 `--policy-files` 可替换成任意绝对/相对路径，`--skip-identity` 表示仅加载策略子图；如需连同身份子图一起写入，则去掉该参数并保证 OpenStack Admin 凭据可用。
 
----
+- **清空 / 加载 / 读取图数据库**  
+  ```bash
+  # 1) 清空 Neo4j（仅 Policy 子图） 
+  python - <<'PY'
+  from openstackpolicygraph import PolicyGraphCreator
+  graph = PolicyGraphCreator("bolt://localhost:7687", "neo4j", "Password")
+  graph.clear_database()
+  graph.close()
+  PY
 
-## 2. 核心文件功能解析
+  # 2) 重新加载（运行完整脚本）
+  python fileparser/run_graph_pipeline.py --policy-files ./fileparser/keystone-policy.yaml
 
-### 2.1 `policypreprocess.py` (策略预处理)
-**功能**: 它是解析链的入口，负责处理 `policy.yaml` 中的**引用别名**。OpenStack 策略允许定义别名（如 `"admin_required": "role:admin"`），并在其他规则中通过 `rule:admin_required` 引用。此脚本将这些引用展开为完整的逻辑表达式。
+  # 3) 读取统计信息
+  python - <<'PY'
+  from openstackpolicygraph import PolicyGraphCreator
+  graph = PolicyGraphCreator("bolt://localhost:7687", "neo4j", "Password")
+  print(graph.get_graph_statistics())
+  graph.close()
+  PY
+  ```
+  
+  根据需要也可以把 URI/用户名/密码替换成远程 Neo4j 的连接参数；若想专门清理 / 重新导入身份子图，可直接运行 `python fileparser/openstackgraph.py --cleanup` 或 `python fileparser/openstackgraph.py`（读取 Keystone 数据、生成 token、创建包含 SystemScope 节点的身份子图）。
+- **仅输出策略检测结果**  
+  ```bash
+  python fileparser/run_graph_pipeline.py \
+    --policy-files ./fileparser/keystone-policy.yaml \
+    --show-check-report
+  ```
+  该命令会执行完整解析流程，但只打印“策略重复检测”报告与步骤提示；若需额外查看 token 状态或策略解析详情，可叠加 `--show-token-info`、`--show-policy-debug`、`--show-policy-statistic` 等开关。
 
-* **输入**: 原始 `policy.yaml` 文件（YAML 或 Key:Value 行格式）。
-* **核心逻辑**:
-    * `read_yaml_and_split_by_colon`: 读取文件并转为字典。
-    * `resolve_rule_references`: 递归查找并替换值中的 `rule:xxx` 字符串，将其替换为被引用规则的实际表达式，并加上括号以保证逻辑优先级。
-* **输出**: 解析后的字典 `{policy_name: full_expanded_expression_string}`。
+## 6. 命令行输出控制
+`run_graph_pipeline.py` 默认会输出完整的执行日志；为了只关注特定阶段，可额外添加下列开关来开启或关闭不同的详尽信息（未打开某个开关时，该阶段只会打印“第 X 步开始/完成”）：
 
-### 2.2 `policy_parser.py` (策略逻辑解析)
-**功能**: 它是解析引擎的核心。负责将预处理后的字符串表达式解析为结构化的逻辑单元，并验证字段的合法性。它利用了 OpenStack 原生库 `oslo.policy` 来理解 `and`、`or`、`not` 等逻辑。
+- `--show-token-info`：输出读取 token 及生成映射时的详细信息。
+- `--show-policy-debug`：在解析每条策略时打印原始表达式及解析结果。
+- `--show-check-report`：打印策略重复/冲突检查的详细报告（默认只记录计数）。
+- `--show-policy-statistic`：写入策略子图后打印 Neo4j 中的节点/关系统计。
 
-* **输入**: 预处理后的策略表达式字符串。
-* **核心逻辑**:
-    * `parse_policy_expression`: 调用 `_parser.parse_rule` 将字符串转为 AST (抽象语法树) 对象。
-    * `_extract_minimal_units`: 将复杂的逻辑树（AND/OR/NOT）转换为 **DNF (析取范式)** 的形式，即提取出“最小满足条件集合”。
-        * 例如 `(role:admin or role:member) and system:all` 会被拆解为两个单元：`[{role:admin, system:all}, {role:member, system:all}]`。
-    * 验证字段是否属于 `VALID_DB_FIELDS` (domain, project, role, system_scope, user)。
-* **输出**: 结构化的最小匹配单元列表 `List[Dict[str, List[str]]]`，可供数据库存储或图谱生成使用。
-
-### 2.3 `openstackpolicygraph.py` (策略图谱构建)
-**功能**: 将解析后的策略逻辑写入 Neo4j 数据库，构建**静态策略子图**。
-
-* **输入**: 策略字典（通常来自 `policy_parser` 或预处理结果）。
-* **核心逻辑**:
-    * 连接 Neo4j 数据库。
-    * `create_policy_graph`:
-        1.  创建 `PolicyNode`（策略动作）。
-        2.  对每个策略的表达式进行归一化（`normalize_expression`）。
-        3.  创建 `RuleNode`，并建立 `(:PolicyNode)-[:HAS_RULE]->(:RuleNode)`。
-        4.  解析表达式中的原子条件（如 `role:admin`），创建 `ConditionNode`。
-        5.  建立 `(:RuleNode)-[:REQUIRES_...]->(:ConditionNode)`。
-* **关系**: 下游模块，依赖上游的解析结果来填充数据库。
-
-### 2.4 `openstackgraph.py` (环境数据导入)
-**功能**: 连接实时的 OpenStack 环境（通过 Keystone API），读取现有的用户、角色、项目和绑定关系，并在 Neo4j 中构建**身份资源子图**。它还包含生成测试数据的功能。
-
-* **输入**: OpenStack Admin API 凭据。
-* **核心逻辑**:
-    * `read_data_from_openstack`: 调用 Keystone API 获取 Users, Roles, Projects, Assignments。
-    * `generate_tokens_from_assignments`: **关键逻辑**。它不直接画 User->Role 线，而是**模拟 Token**。
-        * 如果 User A 在 Project B 拥有 Role C，脚本会生成一个 `Token` 节点。
-        * 建立路径：`User A -> HAS_TOKEN -> Token X -> GRANTS -> Role C`。
-        * 支持模拟“共享 Token”（多个用户拥有相同权限集合）和“独有 Token”。
-    * `create_neo4j_graph`: 将上述节点和关系写入 Neo4j。
-* **输出**: Neo4j 中的身份与权限分配数据。
-
-### 2.5 辅助文件 (`*api.py`, `*merge.py`, `*policy.py`)
-**功能**: 这是一组爬虫和数据对齐工具，用于建立 **API URL (动态日志)** 与 **Policy Name (静态配置)** 之间的映射关系。
-
-* `*api.py`: 爬取 OpenStack 官方文档，提取 API Endpoint (如 `GET /v3/users`)。
-* `*policy.py`: 爬取官方文档，提取 Policy Name (如 `identity:list_users`) 及其默认规则。
-* `*merge.py`: 将上述两者进行模糊匹配或正则匹配，生成 Excel 映射表。这是后续进行**日志分析**（将 API 调用日志映射回图谱中的 PolicyNode）的关键数据源。
-
----
-
-## 3. 模块间数据流向关系图
-
-```mermaid
-graph TD
-    subgraph "Input Source"
-        A[policy.yaml] --> B(policypreprocess.py)
-        LiveOS[OpenStack Environment] --> C(openstackgraph.py)
-        Docs[OpenStack Docs] --> D(Auxiliary Scrapers)
-    end
-
-    subgraph "Parsing & Logic"
-        B -- "Expanded Rules" --> E(policy_parser.py)
-        E -- "Minimal Units (DNF)" --> F(openstackpolicygraph.py)
-        D -- "API List & Policy List" --> G(*merge.py)
-    end
-
-    subgraph "Neo4j Graph Database"
-        F -- "Writes Static Policy Graph" --> DB[(Neo4j)]
-        C -- "Writes Identity Graph" --> DB
-    end
-
-    subgraph "Analysis (Future/Todo)"
-        G -- "Mapping Table (URL <-> Policy)" --> LogAnalysis[Log Analyzer]
-        LogAnalysis -- "Matches Logs to Nodes" --> DB
-    end
-
-    style DB fill:#f9f,stroke:#333,stroke-width:2px
+例如仅关注错误检测，可运行：
+```bash
+python fileparser/run_graph_pipeline.py --show-check-report
+```
+如需同时查看 token 摘要，可叠加 `--show-token-info`，其它阶段命令类似。

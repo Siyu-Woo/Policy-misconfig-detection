@@ -1,7 +1,38 @@
 import yaml
-from typing import Dict
+from typing import Dict, Any, List
 import re
 from policy_split import split_all_or_expressions
+from output_control import general_print as print
+
+
+def _find_unquoted_colon(line: str) -> int:
+    """返回未被引号包裹的第一个冒号位置，找不到则返回-1"""
+    in_single = False
+    in_double = False
+    escaped = False
+
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+
+        if ch == '\\':
+            escaped = True
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+
+        if ch == ':' and not in_single and not in_double:
+            return idx
+
+    return -1
+
 def read_yaml_and_split_by_colon(file_path: str) -> Dict[str, str]:
     """
     读取YAML文件，使用第一个冒号分割每一行，返回字典
@@ -26,11 +57,12 @@ def read_yaml_and_split_by_colon(file_path: str) -> Dict[str, str]:
                 if not line or line.startswith('#'):
                     continue
                 
-                if ':' in line:
-                    colon_index = line.find(':')
-                    key = line[:colon_index].strip().strip('"\'')
-                    value = line[colon_index + 1:].strip().strip('"\'')
-                    result[key] = value
+                colon_index = _find_unquoted_colon(line)
+                if colon_index == -1:
+                    continue
+                key = line[:colon_index].strip().strip('"\'')
+                value = line[colon_index + 1:].strip().strip('"\'')
+                result[key] = value
     
     except Exception as e:
         print(f"错误: 读取文件时发生异常: {e}")
@@ -104,7 +136,32 @@ def resolve_rule_references(policy_dict: Dict[str, str]) -> Dict[str, str]:
     
     return resolved_dict
 
-def process_policy_file(file_path: str) -> Dict[str, str]:
+def extract_policy_entries(file_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    扫描策略文件，记录每个策略键出现的行号及原始表达式
+    """
+    entry_map: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            for line_num, line in enumerate(file, 1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+                colon_index = _find_unquoted_colon(line)
+                if colon_index == -1:
+                    continue
+                key = line[:colon_index].strip().strip('"\'')
+                value = line[colon_index + 1:].strip().strip('"\'')
+                if key:
+                    entry_map.setdefault(key, []).append({
+                        'line': line_num,
+                        'value': value
+                    })
+    except Exception as e:
+        print(f"警告: 无法读取策略文件行号信息 {file_path}: {e}")
+    return entry_map
+
+def process_policy_file(file_path: str) -> Dict[str, Dict[str, Any]]:
     """
     处理策略文件：读取并解析rule引用
     
@@ -118,11 +175,22 @@ def process_policy_file(file_path: str) -> Dict[str, str]:
     policy_dict = read_yaml_and_split_by_colon(file_path)
     
     print(f"读取了 {len(policy_dict)} 个策略规则")
+    entry_map = extract_policy_entries(file_path)
     
     # 解析rule引用
     resolved_dict = resolve_rule_references(policy_dict)
     
-    return resolved_dict
+    enriched_result: Dict[str, Dict[str, Any]] = {}
+    for key, expression in resolved_dict.items():
+        entries = entry_map.get(key, [])
+        enriched_result[key] = {
+            'expression': expression,
+            'file': file_path,
+            'lines': [item['line'] for item in entries],
+            'raw_entries': entries
+        }
+    
+    return enriched_result
 
 # 使用示例
 if __name__ == "__main__":

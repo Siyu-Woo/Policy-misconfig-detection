@@ -8,6 +8,20 @@ from neo4j import GraphDatabase
 import uuid
 import random
 
+from output_control import general_print as print
+
+_TOKEN_OUTPUT_VERBOSE = False
+
+
+def set_token_output_verbose(enabled: bool) -> None:
+    global _TOKEN_OUTPUT_VERBOSE
+    _TOKEN_OUTPUT_VERBOSE = enabled
+
+
+def _token_log(message: str) -> None:
+    if _TOKEN_OUTPUT_VERBOSE:
+        print(message)
+
 # OpenStack 配置
 OS_CONFIG = {
     'auth_url': 'http://localhost:5000/v3',
@@ -315,17 +329,37 @@ class OpenStackNeo4jManager:
                     
                     # 获取 project_id
                     project_id = None
+                    system_scope = None
                     if isinstance(assignment.scope, dict):
                         if 'project' in assignment.scope:
                             project_id = assignment.scope['project'].get('id')
+                        elif 'system' in assignment.scope:
+                            scope_data = assignment.scope['system']
+                            if isinstance(scope_data, dict):
+                                system_scope = next(
+                                    (key for key, value in scope_data.items() if value),
+                                    'all'
+                                )
+                            else:
+                                system_scope = str(scope_data)
                     elif hasattr(assignment.scope, 'project'):
                         project_id = getattr(assignment.scope.project, 'id', None)
+                    elif hasattr(assignment.scope, 'system'):
+                        system_attr = getattr(assignment.scope, 'system', None)
+                        if isinstance(system_attr, dict):
+                            system_scope = next(
+                                (key for key, value in system_attr.items() if value),
+                                'all'
+                            )
+                        elif system_attr:
+                            system_scope = str(system_attr)
                     
-                    if user_id and role_id and project_id:
+                    if user_id and role_id and (project_id or system_scope):
                         role_assignments.append({
                             'user_id': user_id,
                             'role_id': role_id,
-                            'project_id': project_id
+                            'project_id': project_id,
+                            'system_scope': system_scope
                         })
             
             print(f"✓ 解析到 {len(role_assignments)} 个有效的角色分配")
@@ -356,7 +390,8 @@ class OpenStackNeo4jManager:
                             role_assignments.append({
                                 'user_id': user.id,
                                 'role_id': role.id,
-                                'project_id': project.id
+                                'project_id': project.id,
+                                'system_scope': None
                             })
                     except:
                         pass
@@ -367,7 +402,7 @@ class OpenStackNeo4jManager:
     
     def generate_tokens_from_assignments(self, users, roles, role_assignments):
         """根据角色分配生成 token 映射"""
-        print("\n=== 基于角色分配生成 Token 映射 ===")
+        _token_log("\n=== 基于角色分配生成 Token 映射 ===")
         
         # 创建用户ID到用户对象的映射
         user_map = {u.id: u for u in users}
@@ -383,10 +418,14 @@ class OpenStackNeo4jManager:
                 user_roles_map[user_id] = []
             
             if role_id in role_map:
-                user_roles_map[user_id].append(role_map[role_id])
+                user_roles_map[user_id].append({
+                    'role': role_map[role_id],
+                    'project_id': assignment.get('project_id'),
+                    'system_scope': assignment.get('system_scope')
+                })
         
         # 创建共享 token（按角色）
-        print("\n创建共享 Token...")
+        _token_log("\n创建共享 Token...")
         role_shared_tokens = {}
         for role in roles:
             # 为每个角色创建1-2个共享token
@@ -395,18 +434,23 @@ class OpenStackNeo4jManager:
             for _ in range(num_tokens):
                 token_id = str(uuid.uuid4())
                 role_shared_tokens[role.id].append(token_id)
-                print(f"✓ 为角色 {role.name} 创建共享 token {token_id[:8]}...")
+                _token_log(f"✓ 为角色 {role.name} 创建共享 token {token_id[:8]}...")
         
         # 生成 token 映射
         token_role_mappings = []
         shared_token_users = {}
         
-        print("\n为用户生成 Token...")
+        _token_log("\n为用户生成 Token...")
         for user_id, user_roles in user_roles_map.items():
             if user_id not in user_map:
                 continue
             
             user = user_map[user_id]
+            user_role_assignments = [assignment.copy() for assignment in user_roles]
+            
+            def collect_scopes(assignments):
+                scopes = sorted({a['system_scope'] for a in assignments if a.get('system_scope')})
+                return scopes
             
             # 1. 为每个用户生成2个独有 token
             for i in range(2):
@@ -414,14 +458,21 @@ class OpenStackNeo4jManager:
                 token_role_mappings.append({
                     'user': user,
                     'token_id': token_id,
-                    'roles': user_roles,
-                    'shared': False
+                    'role_assignments': [assignment.copy() for assignment in user_role_assignments],
+                    'shared': False,
+                    'system_scopes': collect_scopes(user_role_assignments)
                 })
-                roles_str = ', '.join([r.name for r in user_roles])
-                print(f"✓ 用户 {user.name} 的独有 token {token_id[:8]}... -> [{roles_str}]")
+                roles_str = ', '.join([
+                    assignment['role'].name + (
+                        f"@system({assignment['system_scope']})" if assignment.get('system_scope') else ''
+                    )
+                    for assignment in user_role_assignments
+                ])
+                _token_log(f"✓ 用户 {user.name} 的独有 token {token_id[:8]}... -> [{roles_str}]")
             
             # 2. 为用户分配该角色的共享 token
-            for role in user_roles:
+            for assignment in user_role_assignments:
+                role = assignment['role']
                 if role.id in role_shared_tokens:
                     # 随机选择该角色的一个共享token
                     token_id = random.choice(role_shared_tokens[role.id])
@@ -432,8 +483,9 @@ class OpenStackNeo4jManager:
                         token_role_mappings.append({
                             'user': user,
                             'token_id': token_id,
-                            'roles': [role],
-                            'shared': True
+                            'role_assignments': [assignment.copy()],
+                            'shared': True,
+                            'system_scopes': collect_scopes([assignment])
                         })
                         
                         if token_id not in shared_token_users:
@@ -441,20 +493,22 @@ class OpenStackNeo4jManager:
                         shared_token_users[token_id].append(user.name)
         
         # 打印共享 token 统计
-        print("\n=== 共享 Token 统计 ===")
+        _token_log("\n=== 共享 Token 统计 ===")
         for token_id, user_names in shared_token_users.items():
             # 找到这个token对应的角色
             token_mapping = next((m for m in token_role_mappings if m['token_id'] == token_id), None)
-            if token_mapping and token_mapping['roles']:
-                role_name = token_mapping['roles'][0].name
-                print(f"Token {token_id[:8]}... (角色: {role_name})")
-                print(f"  被 {len(user_names)} 个用户使用: {', '.join(user_names)}")
-        
-        print(f"\n✓ 共生成 {len(token_role_mappings)} 个 token 映射关系")
+            if token_mapping and token_mapping['role_assignments']:
+                role_name = token_mapping['role_assignments'][0]['role'].name
+                scope = token_mapping['role_assignments'][0].get('system_scope')
+                scope_str = f" (system_scope: {scope})" if scope else ""
+                _token_log(f"Token {token_id[:8]}... (角色: {role_name}{scope_str})")
+                _token_log(f"  被 {len(user_names)} 个用户使用: {', '.join(user_names)}")
+
+        _token_log(f"\n✓ 共生成 {len(token_role_mappings)} 个 token 映射关系")
         
         # 统计唯一 token 数量
         unique_tokens = set(m['token_id'] for m in token_role_mappings)
-        print(f"✓ 唯一 token 数: {len(unique_tokens)}")
+        _token_log(f"✓ 唯一 token 数: {len(unique_tokens)}")
         
         return token_role_mappings
     
@@ -472,11 +526,17 @@ class OpenStackNeo4jManager:
             tokens_dict = {}
             roles_dict = {}
             
+            system_scopes_set = set()
+            
             for mapping in token_role_mappings:
                 user = mapping['user']
                 users_dict[user.id] = user
                 tokens_dict[mapping['token_id']] = mapping['shared']
-                for role in mapping['roles']:
+                for scope in mapping.get('system_scopes', []):
+                    if scope:
+                        system_scopes_set.add(scope)
+                for assignment in mapping['role_assignments']:
+                    role = assignment['role']
                     roles_dict[role.id] = role
             
             # 1. 创建用户节点
@@ -492,11 +552,15 @@ class OpenStackNeo4jManager:
             
             # 2. 创建 token 节点
             print(f"\n创建 {len(tokens_dict)} 个唯一 Token 节点...")
-            for token_id, is_shared in tokens_dict.items():
+            token_name_map = {}
+            for idx, (token_id, is_shared) in enumerate(tokens_dict.items(), 1):
+                token_name = f"token{idx}"
+                token_name_map[token_id] = token_name
                 session.run("""
                     MERGE (t:Token {id: $token_id})
-                    SET t.shared = $shared
-                """, token_id=token_id, shared=is_shared)
+                    SET t.shared = $shared,
+                        t.name = $name
+                """, token_id=token_id, shared=is_shared, name=token_name)
             print("✓ Token 节点创建完成")
             
             # 3. 创建角色节点
@@ -507,6 +571,14 @@ class OpenStackNeo4jManager:
                     SET r.name = $role_name
                 """, role_id=role.id, role_name=role.name)
             print("✓ 角色节点创建完成")
+            
+            # 3.5 创建 system scope 节点
+            print(f"\n创建 {len(system_scopes_set)} 个 SystemScope 节点...")
+            for scope in system_scopes_set:
+                session.run("""
+                    MERGE (s:SystemScope {name: $name})
+                """, name=scope)
+            print("✓ SystemScope 节点创建完成")
             
             # 4. 创建 User -> Token 关系
             print(f"\n创建 User -> Token 关系...")
@@ -522,7 +594,8 @@ class OpenStackNeo4jManager:
             # 5. 创建 Token -> Role 关系
             print(f"\n创建 Token -> Role 关系...")
             for mapping in token_role_mappings:
-                for role in mapping['roles']:
+                for assignment in mapping['role_assignments']:
+                    role = assignment['role']
                     session.run("""
                         MATCH (t:Token {id: $token_id})
                         MATCH (r:Role {id: $role_id})
@@ -530,6 +603,19 @@ class OpenStackNeo4jManager:
                     """, token_id=mapping['token_id'],
                         role_id=role.id)
             print("✓ Token -> Role 关系创建完成")
+            
+            # 6. 创建 Token -> SystemScope 关系
+            print(f"\n创建 Token -> SystemScope 关系...")
+            for mapping in token_role_mappings:
+                for scope in mapping.get('system_scopes', []):
+                    if not scope:
+                        continue
+                    session.run("""
+                        MATCH (t:Token {id: $token_id})
+                        MATCH (s:SystemScope {name: $scope})
+                        MERGE (t)-[:HAS_SYSTEM_SCOPE]->(s)
+                    """, token_id=mapping['token_id'], scope=scope)
+            print("✓ Token -> SystemScope 关系创建完成")
             
             # 验证
             print("\n=== 验证图结构 ===")
@@ -557,14 +643,16 @@ class OpenStackNeo4jManager:
             MATCH (u:User) WITH count(u) as users
             MATCH (t:Token) WITH users, count(t) as tokens
             MATCH (r:Role) WITH users, tokens, count(r) as roles
-            MATCH ()-[rel]->() WITH users, tokens, roles, count(rel) as relationships
-            RETURN users, tokens, roles, relationships
+            MATCH (s:SystemScope) WITH users, tokens, roles, count(s) as scopes
+            MATCH ()-[rel]->() WITH users, tokens, roles, scopes, count(rel) as relationships
+            RETURN users, tokens, roles, scopes, relationships
         """).single()
         
         print(f"\n节点统计:")
         print(f"  User 节点: {stats['users']}")
         print(f"  Token 节点: {stats['tokens']}")
         print(f"  Role 节点: {stats['roles']}")
+        print(f"  SystemScope 节点: {stats['scopes']}")
         print(f"  总关系数: {stats['relationships']}")
         
         # 用户的 token 数量

@@ -1,4 +1,5 @@
-"admin_required": "role:admin or is_admin:1"
+"admin_required": "role:admin"
+"admin_or_member ": "role:admin or project_id:%(project_id)s"
 "service_role": "role:service"
 "service_or_admin": "rule:admin_required or rule:service_role"
 "owner": "user_id:%(user_id)s"
@@ -9,7 +10,7 @@
 "identity:get_access_rule": "(role:reader and system_scope:all) or user_id:%(target.user.id)s"
 "identity:list_access_rules": "(role:reader and system_scope:all) or user_id:%(target.user.id)s"
 "identity:delete_access_rule": "(role:admin and system_scope:all) or user_id:%(target.user.id)s"
-"identity:authorize_request_token": "rule:admin_required"
+"identity:authorize_request_token": "rule:admin_required" # 错误6，敏感权限没有systemscope:all
 "identity:get_access_token": "rule:admin_required"
 "identity:get_access_token_role": "rule:admin_required"
 "identity:list_access_tokens": "rule:admin_required"
@@ -19,11 +20,12 @@
 "identity:list_application_credentials": "(role:reader and system_scope:all) or rule:owner"
 "identity:create_application_credential": "user_id:%(user_id)s"
 "identity:delete_application_credential": "(role:admin and system_scope:all) or rule:owner"
-"identity:get_auth_catalog": ""
+"identity:get_auth_catalog": "" # 错误码5，设置空rule
 "identity:get_auth_projects": ""
 "identity:get_auth_domains": ""
 "identity:get_auth_system": ""
-"identity:get_consumer": "role:reader and system_scope:all"
+# "identity:get_consumer": "role:reader and system_scope:all"
+"identity:get_consumer": "role:* and system_scope:all" # 错误码4，通配符
 "identity:list_consumers": "role:reader and system_scope:all"
 "identity:create_consumer": "role:admin and system_scope:all"
 "identity:update_consumer": "role:admin and system_scope:all"
@@ -37,8 +39,10 @@
 "identity:list_domains": "role:reader and system_scope:all"
 "identity:create_domain": "role:admin and system_scope:all"
 "identity:update_domain": "role:admin and system_scope:all"
+"identity:delete_domain": "role:admin and system_scope:all" # 冗余项，测试错误1
 "identity:delete_domain": "role:admin and system_scope:all"
-"identity:create_domain_config": "role:admin and system_scope:all"
+"identity:create_domain_config": "(role:admin or role:reader) and system_scope:all" # 错误码8 敏感权限错配给普通用户
+# "identity:create_domain_config": "role:admin and system_scope:all"
 "identity:get_domain_config": "role:reader and system_scope:all"
 "identity:get_security_compliance_domain_config": ""
 "identity:update_domain_config": "role:admin and system_scope:all"
@@ -53,10 +57,12 @@
 "identity:create_endpoint": "role:admin and system_scope:all"
 "identity:update_endpoint": "role:admin and system_scope:all"
 "identity:delete_endpoint": "role:admin and system_scope:all"
-"identity:create_endpoint_group": "role:admin and system_scope:all"
+# "identity:create_endpoint_group": "role:admin and system_scope:all"
+"identity:create_endpoint_group": "(role:admin and system_scope:all) or (rule:admin_required and system_scope:all)"  # 测试错误项3
 "identity:list_endpoint_groups": "role:reader and system_scope:all"
 "identity:get_endpoint_group": "role:reader and system_scope:all"
 "identity:update_endpoint_group": "role:admin and system_scope:all"
+"identity:update_endpoint_group": "role:admin or role:reader" # 重复项，测试错误2
 "identity:delete_endpoint_group": "role:admin and system_scope:all"
 "identity:list_projects_associated_with_endpoint_group": "role:reader and system_scope:all"
 "identity:list_endpoints_associated_with_endpoint_group": "role:reader and system_scope:all"
@@ -124,7 +130,8 @@
 "identity:delete_policy_association_for_region_and_service": "role:admin and system_scope:all"
 "identity:get_policy_for_endpoint": "role:reader and system_scope:all"
 "identity:list_endpoints_for_policy": "role:reader and system_scope:all"
-"identity:get_project": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.project.domain_id)s) or project_id:%(target.project.id)s"
+"identity:get_project": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.project.domain_id)s)" # 错误码7:未设置project_id
+# "identity:get_project": "((role:reader and system_scope:all) or (role:reader and domain_id:%(target.project.domain_id)s)) and project_id:%(target.project.id)s"
 "identity:list_projects": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.domain_id)s)"
 "identity:list_user_projects": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.user.domain_id)s) or user_id:%(target.user.id)s"
 "identity:create_project": "(role:admin and system_scope:all) or (role:admin and domain_id:%(target.project.domain_id)s)"

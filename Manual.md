@@ -60,16 +60,12 @@
    cd /home/wusy/LabProj/CloudPolicy/Policy\ misconfig\ detection/env-docker
    ```
 
-2. **设置Docker环境变量（如果使用Docker Desktop）**
+2. **设置Docker环境变量（如果使用Docker Desktop），必须，不可以漏**
    ```bash
    export DOCKER_HOST=unix:///var/run/docker.sock
    ```
 
-3. **启动容器（如果非首次启动容器，无需进行挂载）**
-   ```bash
-   docker start openstack-policy-detection
-   ```
-  
+3. **启动容器**
   **（如果首次启动容器）需要进行挂载和端口映射**
    ```bash
    docker run -d --name openstack-policy-detection \
@@ -83,8 +79,25 @@
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/data:/var/lib/neo4j" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/conf:/etc/neo4j" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/logs:/var/log/neo4j" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/assistfile:/root/policy-fileparser/data/assistfile" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/fileparser:/root/policy-fileparser" \
-  openstack-policy-detection:conda-neo4j /usr/bin/supervisord -c /etc/supervisor/conf.d/openstack.conf
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/StatisticDetect:/root/StatisticDetect" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/DynamicDetect:/root/DynamicDetect" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/Tools:/root/Tools" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/Web:/root/Web" \
+  openstack-policy-detection:policyparser \
+  /usr/bin/supervisord -c /etc/supervisor/conf.d/openstack.conf
+
+   ```
+   **如果非首次启动容器，无需进行挂载**
+   ```bash
+   docker start openstack-policy-detection
+   ```
+
+   **如果容器已经启动需要中止**
+   ```bash
+   docker rm openstack-policy-detection
+      # rm后跟需要删除容器以释放端口/名字
    ```
 
 4. **进入容器**
@@ -206,6 +219,18 @@ cypher-shell -u neo4j -p Password 'RETURN 1
    ```
    首次迁移时，可通过 `docker cp openstack-policy-detection:/var/lib/neo4j/. data/neo4j/data` 等命令同步数据、配置和日志。
 
+5. **容器提交**
+   **查看当前容器名（宿主机）**
+   ```bash
+   docker ps
+   ```
+   **提交**
+   ```bash
+   docker commit openstack-policy-detection openstack-policy-detection:policyparser
+      # 后面openstack-policy-detection:policyparser需要改为当前的容器名
+   ```
+
+
 **启动容器及后续可参考“进入容器启动项目”**
 
 #### 容器其他操作
@@ -225,6 +250,21 @@ cypher-shell -u neo4j -p Password 'RETURN 1
    ```
 
 ### 其他操作（按需执行）
+#### 网络代理
+1. **宿主机安装socat**
+pip install socat
+
+2. **开启一个端口（20179）**
+sudo nohup socat TCP-LISTEN:20179,fork,reuseaddr TCP:127.0.0.1:20171 \
+  >/tmp/socat-20179.log 2>&1 &
+
+  # 验证（显示有20179）
+  sudo ss -lntp | grep 20179
+
+
+
+2. 容器内部配置
+
 #### OpenStack服务相关操作
 1. 设置环境变量（首次使用或新会话时需要执行）：
    ```bash
@@ -371,7 +411,7 @@ service apache2 start
 `fileparser/` 目录提供了策略解析、API 抽取、策略与 API 匹配以及知识图谱生成的全部脚本，可配合Neo4j 环境直接运行。
 
 - **策略解析链路**  
-  - `run_graph_pipeline.py`提供了策略解析的 一键处理脚本
+  - `run_graph_pipeline.py`提供了策略解析的一键处理脚本，支持通过 `--show-token-info / --show-policy-debug / --show-check-report / --show-policy-statistic` 等开关控制输出内容；脚本在生成策略图前会自动检测重复策略、重复规则并输出合并建议。
   - `policypreprocess.py`：读取原始策略 YAML/行文本、展开 `rule:` 引用并输出标准字典。  
   - `policy_parser.py`：依赖 `oslo.policy` 和 `keystone.cmd.doctor` 内置数据库，将策略表达式转换为 DNF，并可写入本地策略数据库。  
   - 针对各组件的策略爬虫（`cinderpolicy.py`、`glancepolicy.py`、`neutronpolicy.py`、`nova_policy.py`、`keystonepolicy.py`）会从 docs.openstack.org 拉取策略文档，生成包含 Default/Operations/描述的 Excel，便于后续处理。
@@ -385,4 +425,15 @@ service apache2 start
   - `openstackpolicygraph.py`：`PolicyGraphCreator` 根据策略字典（可直接来自 `policy_parser` 或前述 Excel）生成策略节点及条件节点，自动去重、归一化表达式并写入 Neo4j，可作为策略知识图谱的落地脚本。
 
 #### 其他说明
-1. `fileparser/` 文件夹已挂载到容器内部，位置为：
+1. `fileparser/` 文件夹已挂载到容器内部，位置为：/root/policy-fileparser
+2. 直接python run_graph_pipeline.py即可。
+
+### Tools 模块
+- **CheckOutput (Tools/CheckOutput.py)**：统一的策略检查输出模块，调用 `PolicyCheckReporter` 可以把检测到的错误编号、策略名称、错误信息、整改建议打印到终端，用于 run_graph_pipeline.py 中的重复策略告警等场景。
+- **SensiPermiSet (Tools/SensiPermiSet.py)**：维护敏感权限白名单/黑名单的 CSV 工具。默认操作路径 `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`；提供 `view/add/update/delete` 四个命令，例如新增记录：  
+  ```bash
+  python Tools/SensiPermiSet.py add \
+    --api-name authorize_request_token \
+    --policy-name authorize_request_token \
+    --role admin
+  ```

@@ -11,6 +11,8 @@ import itertools
 from typing import Dict, List, Set, Any, Optional, Tuple
 from oslo_policy import _parser, _checks
 
+from output_control import general_print as print
+
 try:
     from keystone.cmd.doctor.policy_check_system.policy_database import (
         get_database_instance,
