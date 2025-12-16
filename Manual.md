@@ -437,3 +437,13 @@ service apache2 start
     --policy-name authorize_request_token \
     --role admin
   ```
+- **StatisticCheck (StatisticDetect/StatisticCheck.py)**：针对已构建的 Neo4j 策略图谱执行安全基线检查，包含角色通配符、空 rule、敏感策略缺少 system_scope/project 限制、敏感策略对普通角色开放等 5 类检测。脚本默认读取 `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`；如需在宿主机运行可通过 `--perm-file` 覆盖路径。  
+  - 运行命令（容器内）：  
+    ```bash
+    cd /root/StatisticDetect
+    python StatisticCheck.py \
+      --neo4j-uri bolt://localhost:7687 \
+      --neo4j-user neo4j \
+      --neo4j-password Password
+    ```
+    默认输出格式与 `CheckOutput.py` 一致：每条命中会显示 fault type、fault policy rule、fault info、recommendation，若无风险将返回“检测完成，未发现潜在问题”。
