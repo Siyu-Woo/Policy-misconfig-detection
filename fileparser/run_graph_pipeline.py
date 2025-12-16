@@ -234,8 +234,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--policy-files",
-        default="/etc/openstack/policies/keystone-policy.yaml",
-        help="策略文件路径，逗号分隔，默认读取容器挂载目录内的 keystone-policy.yaml",
+        default="/etc/openstack/policies/policy.yaml",
+        help="策略文件路径，逗号分隔，默认读取容器挂载目录内的 policy.yaml",
     )
     parser.add_argument(
         "--neo4j-uri",

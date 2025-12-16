@@ -186,6 +186,70 @@ neo4j status
 **命令行测试**
 ```bash
 cypher-shell -u neo4j -p Password 'RETURN 1
+
+```
+
+**如果是远程访问图数据库，本地主机需要ssh**
+```bash
+ssh -L 7474:localhost:7474 -L 7687:localhost:7687 wusy@58.206.232.230
+```
+
+10.**启动相关命令**
+**运行图数据库解析policy**
+```bash
+cd /root/policy-fileparser
+python run_graph_pipeline.py
+   # 其他命令可见fileparser.md
+```
+
+**运行静态检查代码**
+```bash
+cd /root/StatisticDetect 
+python StatisticCheck.py
+```
+
+11.**运行Web交互**
+**安装依赖**
+```bash
+pip install flask
+wget -O neovis.js https://unpkg.com/neovis.js@2.0.0/dist/neovis.js --no-check-certificate
+```
+
+
+**首先，修改apache端口，释放80端口**
+```bash
+# 1. 注释掉 ports.conf 中的 Listen 80
+sed -i 's/^Listen 80/#Listen 80/g' /etc/apache2/ports.conf
+
+# 2. 禁用可能占用 80 端口的默认站点配置 (如果有的话)
+# 这一步是为了防止重启 apache 时报警告
+if [ -f /etc/apache2/sites-enabled/000-default.conf ]; then
+    rm /etc/apache2/sites-enabled/000-default.conf
+fi
+if [ -f /etc/apache2/sites-enabled/openstack-dashboard.conf ]; then
+    mv /etc/apache2/sites-enabled/openstack-dashboard.conf /etc/apache2/sites-available/openstack-dashboard.conf
+fi
+
+# 3. 重启服务
+service apache2 restart
+```
+
+**验证释放后服务正常**
+```bash
+curl -I http://localhost:5000/v3
+openstack token issue
+```
+
+**检查80端口已经释放**
+```bash
+netstat -tulpn | grep :80
+# 预期输出: 空 (或者只有 tcp6 的显示，只要没有 apache2 监听 IPv4 的 80 即可)
+```
+
+**启动web**
+```bash
+cd /root/Web
+python3 app.py
 ```
 
 ### 容器迁移后挂载

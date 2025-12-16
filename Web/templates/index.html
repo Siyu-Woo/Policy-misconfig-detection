@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy Misconfig Detection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/neovis.js/2.0.0/neovis.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="text-slate-700 antialiased" x-data="appData()">
+
+    <div class="ambient-light"></div>
+
+    <div class="min-h-screen flex flex-col items-center justify-center p-6 relative">
+
+        <div :class="{'fixed bottom-8 right-8 z-50 transition-all duration-500': state !== 'initial', 'relative z-10': state === 'initial'}">
+            <label class="cursor-pointer group relative flex items-center justify-center">
+                <input type="file" class="hidden" @change="handleUpload" accept=".yaml,.yml">
+                <div class="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-2xl transition-transform transform group-hover:scale-105 active:scale-95">
+                    <span x-html="state === 'initial' ? icons.add : icons.restart"></span>
+                </div>
+            </label>
+        </div>
+
+        <div x-show="state === 'processing'" class="text-center z-20" style="display: none;">
+            <div class="relative w-24 h-24 mx-auto mb-6">
+                <div class="absolute inset-0 bg-indigo-100 rounded-full animate-ping opacity-75"></div>
+                <div class="relative w-full h-full flex items-center justify-center">
+                    <span class="text-indigo-600" x-html="icons.loading"></span>
+                </div>
+            </div>
+            <h2 class="text-xl font-light text-slate-800 tracking-wide">Parsing Policy Graph...</h2>
+        </div>
+
+        <div x-show="state === 'result'" class="w-full max-w-6xl h-[85vh] flex flex-col glass-panel rounded-3xl overflow-hidden transition-all duration-700" style="display: none;">
+            
+            <div class="h-16 border-b border-white/50 flex items-center justify-between px-6 bg-white/40 backdrop-blur-md">
+                <div class="flex space-x-2 bg-slate-100/50 p-1 rounded-xl">
+                    <button @click="switchTab('code')" 
+                        :class="{'bg-white shadow-sm text-slate-800': tab==='code', 'text-slate-400 hover:text-slate-600': tab!=='code'}" 
+                        class="p-2 rounded-lg transition-all" title="Code">
+                        <span class="w-5 h-5 block" x-html="icons.code"></span>
+                    </button>
+                    <button @click="switchTab('excel')" 
+                        :class="{'bg-white shadow-sm text-slate-800': tab==='excel', 'text-slate-400 hover:text-slate-600': tab!=='excel'}" 
+                        class="p-2 rounded-lg transition-all" title="Excel">
+                        <span class="w-5 h-5 block" x-html="icons.excel"></span>
+                    </button>
+                    <button @click="switchTab('graph')" 
+                        :class="{'bg-white shadow-sm text-slate-800': tab==='graph', 'text-slate-400 hover:text-slate-600': tab!=='graph'}" 
+                        class="p-2 rounded-lg transition-all" title="Graph">
+                        <span class="w-5 h-5 block" x-html="icons.graph"></span>
+                    </button>
+                </div>
+                <div class="text-xs font-mono text-slate-400">policy.yaml</div>
+            </div>
+
+            <div class="flex-1 overflow-hidden relative bg-white/30">
+                <div x-show="tab === 'code'" class="h-full overflow-auto p-6 bg-white/60">
+                    <pre class="language-yaml !bg-transparent !m-0 !p-0 text-sm"><code id="code-block" class="language-yaml"></code></pre>
+                </div>
+                <div x-show="tab === 'excel'" class="h-full overflow-auto">
+                    <table class="w-full text-left text-sm border-collapse">
+                        <thead class="bg-slate-50 sticky top-0 z-10 shadow-sm text-slate-500 font-medium backdrop-blur bg-opacity-90">
+                            <tr>
+                                <th class="p-4 w-20 text-center">#</th>
+                                <th class="p-4 border-l border-slate-200">Policy Name</th>
+                                <th class="p-4 border-l border-slate-200">Rule Expression</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                            <template x-for="row in excelData" :key="row.line">
+                                <tr :class="getRowClass(row.line)" :style="getRowStyle(row.line)" class="hover:bg-slate-50 transition-all duration-200">
+                                    <td class="p-3 text-center opacity-60 font-mono" x-text="row.line"></td>
+                                    <td class="p-3 font-medium font-mono" x-text="row.name"></td>
+                                    <td class="p-3 opacity-80 font-mono" x-text="row.rule"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <div x-show="tab === 'graph'" class="h-full w-full relative bg-slate-50/50">
+                    <div id="viz" class="w-full h-full"></div>
+                </div>
+            </div>
+
+            <div class="border-t border-white/50 bg-white/80 backdrop-blur p-4 relative z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-6">
+                        <button @click="runCheck" :disabled="checking" class="flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-slate-200">
+                            <span x-show="!checking" x-html="icons.check" class="w-4 h-4"></span>
+                            <span x-show="checking" x-html="icons.loadingSmall" class="w-4 h-4 animate-spin"></span>
+                            <span x-text="checking ? 'Running...' : 'Run Security Check'"></span>
+                        </button>
+                        
+                        <div x-show="checkResult" class="flex items-center space-x-4 text-sm animate-fade-in" x-transition>
+                            <div class="flex items-center space-x-2 text-slate-800 font-bold bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                                <span>Issues: <b x-text="checkResult?.summary?.total"></b></span>
+                            </div>
+                            <div class="flex space-x-3 text-slate-500 text-xs">
+                                <template x-for="(count, type) in checkResult?.summary?.by_type" :key="type">
+                                    <div class="flex items-center space-x-1 bg-slate-100 px-2 py-1 rounded">
+                                        <span class="w-2 h-2 rounded-full" :class="getTheme(type).bg.replace('bg-', 'bg-').replace('50', '400')"></span>
+                                        <span x-text="type + ':'"></span>
+                                        <strong x-text="count"></strong>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button x-show="checkResult && checkResult.summary.total > 0" @click="showCards = !showCards" class="text-slate-400 hover:text-slate-800 transition-transform p-2" :class="{'rotate-180': !showCards}">
+                        <span x-html="icons.chevronUp" class="w-5 h-5"></span>
+                    </button>
+                </div>
+
+                <div x-show="showCards && checkResult" class="mt-4 space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar" 
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 translate-y-4"
+                     x-transition:enter-end="opacity-100 translate-y-0">
+                    
+                    <template x-for="(err, idx) in checkResult?.errors" :key="idx">
+                        <div @click="toggleFocus(idx)" 
+                             class="bg-white border border-slate-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden group active:scale-[0.99]"
+                             :class="focusedErrorIdx === idx ? 'ring-2 ring-blue-500/20 shadow-md' : ''">
+                            
+                            <div class="absolute left-0 top-0 bottom-0 w-1.5 transition-colors" 
+                                 :class="getTheme(err.type).bg.replace('bg-', 'bg-').replace('50', '500')"></div>
+
+                            <div class="pl-3">
+                                <div class="flex justify-between items-start mb-1">
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs font-bold px-2 py-0.5 rounded text-slate-600 bg-slate-100" x-text="err.type"></span>
+                                        <span class="text-xs text-slate-400 font-mono" x-text="'Line: ' + err.lines.join(', ')"></span>
+                                    </div>
+                                    <span class="text-xs text-slate-400 group-hover:text-blue-500 transition-colors" x-text="focusedErrorIdx === idx ? 'Focusing' : 'Click to Focus'"></span>
+                                </div>
+                                
+                                <div class="text-sm font-medium text-slate-800 mb-1" x-text="err.policy"></div>
+                                <div class="text-xs text-slate-500 mb-2" x-text="err.info"></div>
+                                
+                                <div class="text-xs p-2 rounded bg-slate-50 border border-slate-100 text-slate-600 flex items-start">
+                                    <span class="font-bold mr-1 text-slate-400">Fix:</span> 
+                                    <span x-text="err.recommendation"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
