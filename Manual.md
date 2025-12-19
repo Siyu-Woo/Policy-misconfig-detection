@@ -85,6 +85,7 @@
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/DynamicDetect:/root/DynamicDetect" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/Tools:/root/Tools" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/Web:/root/Web" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/log/keystone:/var/log/keystone" \
   openstack-policy-detection:policyparser \
   /usr/bin/supervisord -c /etc/supervisor/conf.d/openstack.conf
 
@@ -120,7 +121,8 @@
 
 6. **加载admin环境变量（openstack admin账号）**
    ```bash
-   source /opt/openstack/envinfo/admin-openrc.sh
+   source /opt/openstack/envinfo/admin-openrc.sh #加载变量
+   env | grep ^OS_   # 查看加载情况
    ```
 
 7. **服务状态检查**
@@ -142,6 +144,15 @@
    **检查Apache服务**
    ```bash
    service apache2 status
+   ```
+
+   **重启Apache/keystone服务**
+   ```bash
+   service supervisor stop 2>/dev/null || true #守护进程关闭
+   service apache2 stop
+      # 自动退出容器，重新start然后进入
+      # sudo docker start openstack-policy-detection openstack-policy-detection
+      # sudo docker exec -it openstack-policy-detection bash
    ```
 
    **检查openstack keystone相关服务正常认证监听**
@@ -215,7 +226,6 @@ pip install flask
 wget -O neovis.js https://unpkg.com/neovis.js@2.0.0/dist/neovis.js --no-check-certificate
 ```
 
-
 **首先，修改apache端口，释放80端口**
 ```bash
 # 1. 注释掉 ports.conf 中的 Listen 80
@@ -249,7 +259,7 @@ netstat -tulpn | grep :80
 **启动web**
 ```bash
 cd /root/Web
-python3 app.py
+python app.py
 ```
 
 ### 容器迁移后挂载
@@ -501,6 +511,10 @@ service apache2 start
     --policy-name authorize_request_token \
     --role admin
   ```
+- **api_requester (Tools/api_requester.py)**：快速执行指定的 OpenStack CLI 命令，默认运行 `openstack user list`，可通过 `--api` 指定命令，支持 `--username/--password/--project/--user-domain/--project-domain/--auth-url/--region/--token` 覆盖 OS_* 凭证。
+- **RoleGrantInfo (Tools/RoleGrantInfo.py)**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv`、`rolegrant.csv`（均位于 `/root/policy-fileparser/data/assistfile`），用于审计项目内的角色分配。
+- **extract_keystone_rbac (Tools/extract_keystone_rbac.py)**：从 `/var/log/keystone/keystone.log` 提取 RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出到 `/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv`，用于分析身份 API 的授权日志。
+- **Policyset (Tools/Policyset.py)**：管理 Keystone 策略文件，支持复制策略到 `/etc/keystone/keystone_policy.yaml`，添加/合并/删除策略条目，导出策略（例如 `/etc/openstack/policies/keystone_policy_export.yaml`），或禁用自定义策略回退默认。操作结束会提示重启 Keystone（Apache）。
 - **StatisticCheck (StatisticDetect/StatisticCheck.py)**：针对已构建的 Neo4j 策略图谱执行安全基线检查，包含角色通配符、空 rule、敏感策略缺少 system_scope/project 限制、敏感策略对普通角色开放等 5 类检测。脚本默认读取 `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`；如需在宿主机运行可通过 `--perm-file` 覆盖路径。  
   - 运行命令（容器内）：  
     ```bash
@@ -511,3 +525,14 @@ service apache2 start
       --neo4j-password Password
     ```
     默认输出格式与 `CheckOutput.py` 一致：每条命中会显示 fault type、fault policy rule、fault info、recommendation，若无风险将返回“检测完成，未发现潜在问题”。
+
+### Dynamic Detection    
+- **Authorization_scope_check (DynamicDetect/Authorization_scope_check.py)**：基于 RBAC 审计日志统计 `{api, user, role, project}` 使用情况，生成 `rbac_audit_keystone_temp.csv`，并结合 Neo4j 检测“授权过宽/未被使用”的策略（错误码 10/11）。默认读取 `/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv` 与 `/root/policy-fileparser/data/assistfile/rolegrant.csv`。  
+  - 运行命令（容器内）：  
+    ```bash
+    cd /root/DynamicDetect
+    python Authorization_scope_check.py \
+      --neo4j-uri bolt://localhost:7687 \
+      --neo4j-user neo4j \
+      --neo4j-password Password
+    ```

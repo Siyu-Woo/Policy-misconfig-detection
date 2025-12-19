@@ -121,3 +121,48 @@
 
 4. **错误样例**  
    `identity:create_domain_config` 预期只允许 `role:admin`，当前策略未设置任何角色，检测结果提示“Policy identity:create_domain_config should limit roles to [admin]”，并输出错误码 8。  
+
+---
+
+## 错误码 9 - Repeat Condition
+1. **错误说明**  \
+   同一 Policy 节点下存在两个 Rule，其中一个 Rule 的条件集合（按 type+name 匹配）是另一个 Rule 条件集合的子集，属于冗余重复。  \
+
+2. **修改建议**  \
+   删除被判定为子集的那条 Rule，保留条件更完整的 Rule。检测输出会给出冗余 Rule 的表达式。  \
+
+3. **检测代码**  \
+   `StatisticDetect/StatisticCheck.py` 中的 `check_rule_subsets`，遍历每个 Policy 的所有 Rule 条件集合，发现子集关系即输出错误码 9。  \
+
+4. **错误样例**  \
+   `identity:list_projects` 下有两条规则：`role:admin and project_id:%(project_id)s` 与 `role:admin`。后者条件集合是前者的子集，被判定为冗余，建议删除 `role:admin` 这一条（错误码 9）。  
+
+---
+
+## 错误码 10 - Role or Scope Over Authorization
+1. **错误说明**  
+   某个 Policy 的 Rule 没有被审计日志统计到的 `{api, role, project}` 组合匹配到，说明存在“已授权但未被实际使用”的 Rule，可能授权过宽。  
+
+2. **修改建议**  
+   删除未被匹配到的 Rule（输出会给出该 Rule 的表达式）。  
+
+3. **检测代码**  
+   `DynamicDetect/Authorization_scope_check.py` 中 `check_unused_rules`。  
+
+4. **错误样例**  
+   `identity:list_users` 有两条规则，其中一条未被任何 `{role, project}` 组合匹配到，输出错误码 10 并建议删除该 Rule。  
+
+---
+
+## 错误码 11 - API Over Authorization
+1. **错误说明**  
+   某个 API 在图数据库中存在 PolicyNode，但审计日志统计结果中完全未出现该 API，说明该 API 未被实际使用但仍保留策略。  
+
+2. **修改建议**  
+   删除该 API 的完整策略（输出会给出完整策略表达式）。  
+
+3. **检测代码**  
+   `DynamicDetect/Authorization_scope_check.py` 中 `check_untracked_policies`。  
+
+4. **错误样例**  
+   `identity:list_domains` 从未在日志出现，但图中存在对应策略，输出错误码 11 并建议删除整条策略。  

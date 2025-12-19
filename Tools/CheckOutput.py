@@ -51,6 +51,21 @@ ERROR_TEMPLATES: Dict[str, Dict[str, str]] = {
         "fault_type": "{api} privileges to regular role",
         "fault_info": "{fault_info}",
         "recommendation": "Warning: Not set the role into regular role"
+    },
+    "9": {
+        "fault_type": "Repeat Condition",
+        "fault_info": "Delete Repeat Condition",
+        "recommendation": "{rule} should be delete"
+    },
+    "10": {
+        "fault_type": "Role or Scope Over Authorization",
+        "fault_info": "{api} is not being used by the assigned Role/ in the assigned Scope",
+        "recommendation": "Delete the {rule}"
+    },
+    "11": {
+        "fault_type": "API Over Authorization",
+        "fault_info": "{api} is used",
+        "recommendation": "Delete the {policy}"
     }
 }
 

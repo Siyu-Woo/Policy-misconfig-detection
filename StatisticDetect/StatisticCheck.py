@@ -272,6 +272,67 @@ def check_sensitive_roles(session, reporter: PolicyCheckReporter, entries: List[
     return total
 
 
+def check_rule_subsets(session, reporter: PolicyCheckReporter) -> int:
+    """
+    错误码 9：同一 Policy 下，存在 Rule 的条件集合为另一 Rule 条件集合的子集（条件 type/name 均一致）。
+    子集 Rule 视为重复，应删除。
+    """
+    total = 0
+    result = session.run(
+        """
+        MATCH (p:PolicyNode)-[:HAS_RULE]->(r:RuleNode)
+        OPTIONAL MATCH (r)-[:REQUIRES_ROLE|REQUIRES_SYSTEM_SCOPE|REQUIRES_PROJECT_ID|REQUIRES_USER_ID|REQUIRES_DOMAIN_ID|REQUIRES_TOKEN_DOMAIN_ID]->(c:ConditionNode)
+        WITH p, r, collect({type:c.type, name:c.name}) AS conds
+        RETURN p.name AS policy, p.policyline AS lines, r.expression AS expr, conds
+        """
+    )
+
+    policies: Dict[str, Dict[str, Any]] = {}
+    for record in result:
+        policy = record["policy"]
+        if policy not in policies:
+            policies[policy] = {"lines": record["lines"], "rules": []}
+        conds = [
+            {"type": (c.get("type") or "").strip(), "name": (c.get("name") or "").strip()}
+            for c in (record["conds"] or [])
+            if c is not None
+        ]
+        policies[policy]["rules"].append(
+            {
+                "expr": (record["expr"] or "").strip(),
+                "conds": conds,
+            }
+        )
+
+    def is_subset(a: List[Dict[str, str]], b: List[Dict[str, str]]) -> bool:
+        # 判断 a 是否是 b 的子集（按 type+name 匹配）
+        set_b = {(c["type"], c["name"]) for c in b}
+        return all((c["type"], c["name"]) in set_b for c in a)
+
+    reported = set()
+    for policy, info in policies.items():
+        rules = info["rules"]
+        for i in range(len(rules)):
+            for j in range(len(rules)):
+                if i == j:
+                    continue
+                a = rules[i]
+                b = rules[j]
+                if a["conds"] and is_subset(a["conds"], b["conds"]):
+                    key = (policy, a["expr"], b["expr"])
+                    if key in reported:
+                        continue
+                    reported.add(key)
+                    reporter.report(
+                        "9",
+                        policy_name=format_policy_rule(policy, info["lines"]),
+                        fault_info="Delete Repeat Condition",
+                        rule=a["expr"] or "(rule expression missing)",
+                    )
+                    total += 1
+    return total
+
+
 def main() -> None:
     args = parse_args()
     driver = connect(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
@@ -290,6 +351,7 @@ def main() -> None:
         total += check_sensitive_scopes(session, reporter, entries)
         total += check_sensitive_projects(session, reporter, entries)
         total += check_sensitive_roles(session, reporter, entries)
+        total += check_rule_subsets(session, reporter)
         if total == 0:
             print("✓ 检测完成，未发现潜在问题。")
         else:

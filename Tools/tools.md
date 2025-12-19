@@ -28,14 +28,67 @@
   python Tools/SensiPermiSet.py delete --id 1
   ```
 
-## 3. StatisticDetect/StatisticCheck.py
-- **功能**：连接 Neo4j 图库，对策略图执行统计检测：包括 role/system_scope 通配符、敏感权限限定范围、敏感权限错误角色等检查，并调用 `CheckOutput` 输出错误码 4~7。
-- **输入**：默认连接参数 `bolt://localhost:7687 / neo4j / Password`，可通过 `--neo4j-uri/--neo4j-user/--neo4j-password` 覆盖；高权限列表通过 `--perm-file` 指定（默认 `data/assistfile/sensitive_permissions.csv`）。
-- **输出**：命令行提示检测结果、若发现问题则按错误码打印详细说明。
+## 3. api_requester.py
+- **功能**：快速发起指定 OpenStack CLI 命令，支持通过命令行覆盖 OS_* 凭证，默认执行 `openstack user list`。
+- **输入**：`--api "openstack project list"` 等；可选 `--username/--password/--project/--user-domain/--project-domain/--auth-url/--region/--token` 用于切换身份。
+- **输出**：命令执行结果直接打印到终端。
+- **路径**：`Tools/api_requester.py`
 - **示例**：
   ```bash
-  python StatisticDetect/StatisticCheck.py \
-    --neo4j-uri bolt://localhost:7687 \
-    --neo4j-user neo4j \
-    --neo4j-password Password
+  python Tools/api_requester.py
+  python Tools/api_requester.py --api "openstack project list"
+  python Tools/api_requester.py --api "openstack user list" \
+    --username demo --password secret --project demo \
+    --user-domain Default --project-domain Default --auth-url http://127.0.0.1:5000/v3
   ```
+
+## 4. RoleGrantInfo.py
+- **功能**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv` 和 `rolegrant.csv`。
+- **输入**：无命令行参数，直接运行依赖当前 OS_* 凭证调用 `openstack` CLI。
+- **输出**：CSV 文件写入 `data/assistfile` 目录；终端打印总记录数，权限不足时提示使用 admin 凭证。
+- **路径**：`Tools/RoleGrantInfo.py`
+- **示例**：
+  ```bash
+  python /root/Tools/RoleGrantInfo.py
+  # 生成的文件：userinfo.csv、projectinfo.csv、roleinfo.csv、rolegrant.csv（均位于 data/assistfile）
+  ```
+
+## 5. extract_keystone_rbac.py
+- **功能**：从 `keystone.log` 中提取 Keystone RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出 CSV。
+- **输入**：无命令行参数，读取 `/var/log/keystone/keystone.log`。
+- **输出**：`data/assistfile/rbac_audit_keystone.csv`，末尾附生成时间注释。
+- **路径**：`Tools/extract_keystone_rbac.py`
+- **示例**：
+  ```bash
+  python /root/Tools/extract_keystone_rbac.py
+  # 结果文件：data/assistfile/rbac_audit_keystone.csv
+  ```
+
+## 6. Policyset.py
+- **功能**：管理 Keystone 策略文件，支持复制策略、添加/合并策略规则、删除策略、导出策略、禁用自定义策略。
+- **输入**：子命令模式：
+  - `copy --src <file>`：将指定策略文件复制到 `/etc/keystone/keystone_policy.yaml`（默认 src 为 `/root/policy-fileparser/policy.yaml`）。
+  - `add --name <policy> [--role <role>] [--project <project_id>]`：为策略新增条件，若已存在则 `(原规则) or (新条件)` 合并。
+  - `delete --name <policy>`：删除指定策略条目。
+  - `export --dst <path>`：导出 `/etc/keystone/keystone_policy.yaml` 到指定路径（推荐 `/root/policy-fileparser/`）。
+  - `disable`：修改 `keystone.conf` 清空 `[oslo_policy] policy_file`，回退默认策略。
+- **输出**：终端提示操作结果，结束时提示重启 Keystone（Apache）。
+- **路径**：`Tools/Policyset.py`
+- **示例**：
+  ```bash
+  # 复制策略文件
+  python /root/Tools/Policyset.py copy --src /root/policy-fileparser/policy.yaml
+
+  # 为策略添加条件
+  python /root/Tools/Policyset.py add --name identity:list_projects --role reader --project "%(project_id)s" # 注意有括号在输入命令行时候需要加引号
+
+  # 删除策略
+  python /root/Tools/Policyset.py delete --name identity:list_projects
+
+  # 导出策略
+  python /root/Tools/Policyset.py export --dst /etc/openstack/policies/keystone_policy_export.yaml
+
+  # 禁用自定义策略，回退默认
+  python /root/Tools/Policyset.py disable
+  ```
+- 注意，如果使用policy版本内容有：DEMO_PROJECT_ID ，需要终端输入一次这个DEMO_PROJECT_ID = b5c386f2b477440ba83fc0ca0500c2bb

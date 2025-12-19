@@ -1,0 +1,11 @@
+# 默认所有 API 需要 admin
+"default": "role:admin"
+
+# admin：在任意作用域保留默认 admin 权限
+"context_is_admin": "role:admin"
+"admin_required": "role:admin"
+
+# demo-project 的 admin/reader 仅能列项目、用户、角色
+"identity:list_projects": "(role:admin and project_id:DEMO_PROJECT_ID) or (role:reader and project_id:DEMO_PROJECT_ID)"
+"identity:list_users":    "(role:admin and project_id:DEMO_PROJECT_ID) or (role:reader and project_id:DEMO_PROJECT_ID)"
+"identity:list_roles":    "(role:admin and project_id:DEMO_PROJECT_ID) or (role:reader and project_id:DEMO_PROJECT_ID)"

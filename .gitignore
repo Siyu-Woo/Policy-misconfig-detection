@@ -37,6 +37,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+log/
 
 # Temporary files
 *.tmp
@@ -45,6 +46,8 @@ logs/
 
 # Database files and server state (exclude from git as they're large and environment-specific)
 env-docker/server\ state/
+data/neo4j/data/
+data/assistfile/*.csv
 *.sqlite
 *.db
 
