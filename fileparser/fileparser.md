@@ -1,6 +1,6 @@
 # fileparser 模块说明
 
-本文档概述 `fileparser` 目录中与图构建相关的五个脚本：`policypreprocess.py`、`policy_parser.py`、`openstackpolicygraph.py`、`openstackgraph.py` 与 `run_graph_pipeline.py`，并整理它们的输入/输出、依赖关系、Neo4j 的数据结构以及策略文件路径。
+本文档概述 `fileparser` 目录中与图构建相关的六个脚本：`policypreprocess.py`、`policy_parser.py`、`openstackpolicygraph.py`、`openstackgraph.py`、`run_graph_pipeline.py` 与 `PolicyGen.py`，并整理它们的输入/输出、依赖关系、Neo4j 的数据结构以及策略文件路径。
 
 ## 1. 关键脚本的功能、输入与输出
 
@@ -29,6 +29,20 @@
 - **输入**：命令行参数（服务列表、策略文件路径、Neo4j 连接、是否跳过身份/策略阶段、输出控制开关等）。
 - **输出**：调用 OpenStack CLI 进行凭证检查；若未跳过则先执行 `openstackgraph` 写入身份子图，再调用 `policypreprocess + policy_parser + openstackpolicygraph` 写入策略子图；同时输出策略重复/冲突检测报告及统计信息（可通过命令行开关控制显示）。
 - **策略重复检查**：脚本在建图前会检测（1）同一个 API 是否被多条策略重复定义；（2）单个策略内部是否包含重复规则。若发现问题，会通过 `Tools/CheckOutput.py` 模块输出对应的错误码、问题策略以及合并建议，便于后续修订策略文件。
+
+### PolicyGen.py
+- **功能**：提供三类生成能力：（1）从图数据库导出当前策略矩阵 CSV；（2）从 CSV 生成策略 YAML；（3）从图数据库直接生成策略 YAML。
+- **输入**：
+  - graph-to-csv：Neo4j 连接参数，项目映射 `data/assistfile/projectinfo.csv`（可自定义路径）。
+  - csv-to-yaml：多个 CSV 文件及对应 project 名称列表（允许最多一个 project 为空）；读取 `data/assistfile/projectinfo.csv` 将 project_name 转换为 UUID。
+  - graph-to-yaml：Neo4j 连接参数；读取 `data/assistfile/projectinfo.csv` 将表达式中的 `project:<name>` 转换为 UUID。
+- **输出**：
+  - graph-to-csv：输出 `NowPermit.csv` 与 `NowPermitin{project_name}.csv`；第一列为 api_name，第一行是 role。
+  - csv-to-yaml / graph-to-yaml：输出 `Policy{时间}.yaml`（或指定文件名）。
+- **注意事项**：
+  - `csv-to-yaml` 要求所有 CSV 的 API 行与 role 列一致，否则报错。
+  - `csv-to-yaml` 只能有一个 CSV 不指定 project。
+  - 若 `data/assistfile/projectinfo.csv` 中不存在指定 project_name，会直接报错。
 
 ## 2. 文件之间的依赖关系
 1. `run_graph_pipeline.py` 调用 `policypreprocess.process_policy_file()` 读取并展开策略。
@@ -106,11 +120,11 @@
   PY
   ```
   
-  根据需要也可以把 URI/用户名/密码替换成远程 Neo4j 的连接参数；若想专门清理 / 重新导入身份子图，可直接运行 `python fileparser/openstackgraph.py --cleanup` 或 `python fileparser/openstackgraph.py`（读取 Keystone 数据、生成 token、创建包含 SystemScope 节点的身份子图）。
+  根据需要也可以把 URI/用户名/密码替换成远程 Neo4j 的连接参数；若想专门清理 / 重新导入身份子图，可直接运行 `python /root/policy-fileparser/openstackgraph.py --cleanup` 或 `python /root/policy-fileparser/openstackgraph.py`（读取 Keystone 数据、生成 token、创建包含 SystemScope 节点的身份子图）。
 - **仅输出策略检测结果**  
   ```bash
-  python fileparser/run_graph_pipeline.py \
-    --policy-files ./fileparser/keystone-policy.yaml \
+  python /root/policy-fileparser/run_graph_pipeline.py \
+    --policy-files /etc/openstack/policies/keystone-policy.yaml \
     --show-check-report
   ```
   该命令会执行完整解析流程，但只打印“策略重复检测”报告与步骤提示；若需额外查看 token 状态或策略解析详情，可叠加 `--show-token-info`、`--show-policy-debug`、`--show-policy-statistic` 等开关。
@@ -125,6 +139,29 @@
 
 例如仅关注错误检测，可运行：
 ```bash
-python fileparser/run_graph_pipeline.py --show-check-report
+python /root/policy-fileparser/run_graph_pipeline.py --show-check-report
 ```
 如需同时查看 token 摘要，可叠加 `--show-token-info`，其它阶段命令类似。
+
+- **PolicyGen.py 生成 CSV / YAML**  
+  ```bash
+  # 1) 图数据库 -> CSV
+  python /root/policy-fileparser/PolicyGen.py graph-to-csv \
+    --neo4j-uri bolt://localhost:7687 \
+    --neo4j-user neo4j \
+    --neo4j-password Password \
+    --output-dir "/etc/openstack/policies"
+
+  # 2) CSV -> YAML（允许最多一个 project 为空）
+  python /root/policy-fileparser/PolicyGen.py csv-to-yaml \
+    --csv-files "/etc/openstack/policies/NowPermit.csv" "/etc/openstack/policies/NowPermitinadmin.csv" \
+    --projects none admin \
+    --output "/etc/openstack/policies/PolicyFromCsv.yaml"
+
+  # 3) 图数据库 -> YAML
+  python /root/policy-fileparser/PolicyGen.py graph-to-yaml \
+    --neo4j-uri bolt://localhost:7687 \
+    --neo4j-user neo4j \
+    --neo4j-password Password \
+    --output "/etc/openstack/policies/PolicyFromGraph.yaml"
+  ```

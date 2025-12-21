@@ -11,7 +11,7 @@
   export OS_AUTH_URL=http://127.0.0.1:5000/v3
   export OS_REGION_NAME=RegionOne
   ```
-- newuser（请替换真实密码，默认域 Default，示例切到 demo-project）  
+- newuser（默认域 Default，示例切到 demo-project）  
   ```bash
   export OS_USERNAME=newuser
   export OS_PASSWORD=MyPass123
@@ -21,6 +21,20 @@
   export OS_AUTH_URL=http://127.0.0.1:5000/v3
   export OS_REGION_NAME=RegionOne
   ```
+
+- manager（默认域 Default，示例切到 demo-project）  
+  ```bash
+  export OS_AUTH_URL=http://127.0.0.1:5000/v3
+  export OS_IDENTITY_API_VERSION=3
+  export OS_REGION_NAME=RegionOne
+  export OS_INTERFACE=internal
+  export OS_USERNAME=manager
+  export OS_PASSWORD=MyPass123
+  export OS_USER_DOMAIN_NAME=Default
+  export OS_PROJECT_NAME=demo-project
+  export OS_PROJECT_DOMAIN_NAME=Default
+  ```
+
 
 ## 2. 切换用户与查看当前身份
 - 切换：设置（或 source 对应 openrc）新的 `OS_USERNAME/OS_PASSWORD/OS_PROJECT_NAME/...` 环境变量。
@@ -42,8 +56,6 @@
 - 将 policyDynamic.yaml 应用为 Keystone 策略：
   ```bash
   # 在容器内
-  export DEMO_PROJECT_ID=b5c386f2b477440ba83fc0ca0500c2bb
-  export ADMIN_PROJECT_ID=938f3a5516bd40a68c730191901007e6
   python /root/Tools/Policyset.py copy --src "/etc/openstack/policies/policyDynamic.yaml"
   service supervisor stop 2>/dev/null || true 
   service apache2 stop
@@ -84,3 +96,54 @@
 nano /etc/keystone/keystone.conf
 # 如果注释policy路径中相关的三行（policy文件路径两行），让policy不生效
 # 千万不要启动enforce_scope
+
+
+## 6 测试自建manager 环境
+- 将 test1221.yaml 应用为 Keystone 策略：
+  ```bash
+  # 在容器内
+  python /root/Tools/Policyset.py copy --src "/etc/openstack/policies/test1221.yaml"
+  service supervisor stop 2>/dev/null || true 
+  service apache2 stop
+  ```
+
+- 重启容器：
+  ```bash
+  sudo docker start openstack-policy-detection
+  sudo docker exec -it openstack-policy-detection bash
+  source /opt/openstack/envinfo/admin-openrc.sh
+  env | grep ^OS_ # 查看当前用户
+  openstack role assignment list --user manager --project demo-project --names # 查看是否赋予用户manager的角色manager（应该会显示）
+  neo4j start  # 其他需要更新的
+  ```
+
+- 切换用户manager：
+  ```bash
+  export OS_AUTH_URL=http://127.0.0.1:5000/v3
+  export OS_IDENTITY_API_VERSION=3
+  export OS_REGION_NAME=RegionOne
+  export OS_INTERFACE=internal
+  export OS_USERNAME=manager
+  export OS_PASSWORD=MyPass123
+  export OS_USER_DOMAIN_NAME=Default
+  export OS_PROJECT_NAME=demo-project
+  export OS_PROJECT_DOMAIN_NAME=Default
+  openstack token issue
+  ```
+
+- 对比测试一下，切换newuser：
+  ```bash
+  export OS_USERNAME=newuser
+  export OS_PASSWORD=MyPass123
+  export OS_USER_DOMAIN_NAME=Default
+  export OS_PROJECT_NAME=demo-project
+  export OS_PROJECT_DOMAIN_NAME=Default
+  export OS_AUTH_URL=http://127.0.0.1:5000/v3
+  export OS_REGION_NAME=RegionOne
+  openstack token issue
+
+  ```
+
+source /opt/openstack/envinfo/admin-openrc.sh
+python /root/Tools/Policyset.py copy --src "/etc/openstack/policies/LevelMisConf.yaml"
+python /root/policy-fileparser/run_graph_pipeline.py --policy-file "/etc/openstack/policies/LevelMisConf.yaml"

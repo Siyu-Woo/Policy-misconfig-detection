@@ -76,10 +76,10 @@
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/policy file:/etc/openstack/policies" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/env-docker/server state:/var/lib/openstack/state" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/env-docker/envinfo:/opt/openstack/envinfo" \
-  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/data:/var/lib/neo4j" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/data:/lib/var/neo4j" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/conf:/etc/neo4j" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/neo4j/logs:/var/log/neo4j" \
-  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/assistfile:/root/policy-fileparser/data/assistfile" \
+  -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/data/assistfile:/root/policy-fileparser/data/assistfile" 
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/fileparser:/root/policy-fileparser" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/StatisticDetect:/root/StatisticDetect" \
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/DynamicDetect:/root/DynamicDetect" \
@@ -88,7 +88,6 @@
   -v "/home/wusy/LabProj/CloudPolicy/Policy misconfig detection/log/keystone:/var/log/keystone" \
   openstack-policy-detection:policyparser \
   /usr/bin/supervisord -c /etc/supervisor/conf.d/openstack.conf
-
    ```
    **如果非首次启动容器，无需进行挂载**
    ```bash
@@ -323,7 +322,7 @@ python app.py
    docker rm openstack-policy-detection
    ```
 
-### 其他操作（按需执行）
+### 本地远程服务器工作
 #### 网络代理
 1. **宿主机安装socat**
 pip install socat
@@ -335,6 +334,8 @@ sudo nohup socat TCP-LISTEN:20179,fork,reuseaddr TCP:127.0.0.1:20171 \
   # 验证（显示有20179）
   sudo ss -lntp | grep 20179
 
+3. **特殊情况下运行这个ssh，最好不要**
+ ssh -L 8081:localhost:80 -L 7474:localhost:7474 -L 7689:localhost:7687 wusy@58.206.232.230
 
 
 2. 容器内部配置
@@ -515,16 +516,37 @@ service apache2 start
 - **RoleGrantInfo (Tools/RoleGrantInfo.py)**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv`、`rolegrant.csv`（均位于 `/root/policy-fileparser/data/assistfile`），用于审计项目内的角色分配。
 - **extract_keystone_rbac (Tools/extract_keystone_rbac.py)**：从 `/var/log/keystone/keystone.log` 提取 RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出到 `/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv`，用于分析身份 API 的授权日志。
 - **Policyset (Tools/Policyset.py)**：管理 Keystone 策略文件，支持复制策略到 `/etc/keystone/keystone_policy.yaml`，添加/合并/删除策略条目，导出策略（例如 `/etc/openstack/policies/keystone_policy_export.yaml`），或禁用自定义策略回退默认。操作结束会提示重启 Keystone（Apache）。
-- **StatisticCheck (StatisticDetect/StatisticCheck.py)**：针对已构建的 Neo4j 策略图谱执行安全基线检查，包含角色通配符、空 rule、敏感策略缺少 system_scope/project 限制、敏感策略对普通角色开放等 5 类检测。脚本默认读取 `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`；如需在宿主机运行可通过 `--perm-file` 覆盖路径。  
+-
+### StatisticCheck
+ -**(StatisticDetect/StatisticCheck.py)**：针对已构建的 Neo4j 策略图谱执行安全基线检查，包含角色通配符、空 rule、敏感策略缺少 system_scope/project 限制、敏感策略对普通角色开放等 5 类检测。脚本默认读取 `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`；如需在宿主机运行可通过 `--perm-file` 覆盖路径。  
   - 运行命令（容器内）：  
     ```bash
     cd /root/StatisticDetect
-    python StatisticCheck.py \
+    python /root/StatisticDetect/StatisticCheck.py \
       --neo4j-uri bolt://localhost:7687 \
       --neo4j-user neo4j \
       --neo4j-password Password
     ```
     默认输出格式与 `CheckOutput.py` 一致：每条命中会显示 fault type、fault policy rule、fault info、recommendation，若无风险将返回“检测完成，未发现潜在问题”。
+
+### UnkownStatisticCheck
+ -**(StatisticDetect/UnkownStatisticCheck.py)**：基于策略图统计高/低权限角色占比，输出 `RoleStatistic{时间}.csv` 到 `/root/policy-fileparser/data/assistfile/`。脚本读取 `/root/policy-fileparser/data/assistfile/projectinfo.csv` 将 project_id 映射为 project_name，并默认使用 `/root/policy-fileparser/data/assistfile/role_level.json` 管理高低权限角色集合。  
+  - 输入：Neo4j 连接信息；projectinfo.csv；role_level.json（可通过命令行维护）。  
+  - 输出：统计 CSV；并输出错误码 12/13（高低权限错配/敏感权限错配）。  
+  - 运行命令（容器内）：  
+    ```bash
+    cd /root/StatisticDetect
+    python /root/StatisticDetect/UnkownStatisticCheck.py check \
+      --neo4j-uri bolt://localhost:7687 \
+      --neo4j-user neo4j \
+      --neo4j-password Password
+    ```
+  - 角色集合管理示例（容器内）：  
+    ```bash
+    python /root/StatisticDetect/UnkownStatisticCheck.py roles --level high --list
+    python /root/StatisticDetect/UnkownStatisticCheck.py roles --level high --add managerF
+    python /root/StatisticDetect/UnkownStatisticCheck.py roles --level low --remove memberE
+    ```
 
 ### Dynamic Detection    
 - **Authorization_scope_check (DynamicDetect/Authorization_scope_check.py)**：基于 RBAC 审计日志统计 `{api, user, role, project}` 使用情况，生成 `rbac_audit_keystone_temp.csv`，并结合 Neo4j 检测“授权过宽/未被使用”的策略（错误码 10/11）。默认读取 `/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv` 与 `/root/policy-fileparser/data/assistfile/rolegrant.csv`。  

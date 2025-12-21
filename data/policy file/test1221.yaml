@@ -6,13 +6,13 @@
 # reader 在 admin 项目拥有所有 list 命令。
 
 # openstack project list
-"identity:list_projects": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
+"identity:list_projects": "role:admin or ((role:reader or role:manager) and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
 
 # openstack user list
-"identity:list_users": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
+"identity:list_users": "role:admin or ((role:reader or role:manager) and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
 
 # openstack role list
-"identity:list_roles": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
+"identity:list_roles": "role:admin or ((role:reader or role:manager) and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
 
 # openstack service list
 "identity:list_services": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
@@ -21,10 +21,10 @@
 "identity:list_domains": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb) or (role:reader and project_id:938f3a5516bd40a68c730191901007e6)"
 
 # 设置类命令（仅示例）
-# openstack user set --email newmail@example.com --description "readerset member" member
+# openstack user set --email newmail@example.com --description "adminset2 member" member
 "identity:update_user": "role:admin or (role:reader and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
 
-# openstack project set --description "userset proj" demo-project 
+# openstack project set --description "adminset proj" demo-project
 "identity:update_project": "role:admin"
 
 # openstack role set --name <NEW_ROLE_NAME> <ROLE_ID_OR_NAME>

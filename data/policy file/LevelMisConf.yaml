@@ -1,0 +1,48 @@
+# Auto-generated policy set for level-based misconfig tests
+
+# cmd: openstack domain create <domain_name>
+identity:create_domain: "role:admin or ((role:managerA or role:managerB or role:managerC) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack group create <group_name>
+identity:create_group: "role:admin or ((role:managerC or role:managerE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack project create <project_name>
+identity:create_project: "role:admin or ((role:managerA or role:managerB or role:managerC) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack role create <role_name>
+identity:create_role: "role:admin or ((role:memberB or role:memberC or role:memberD or role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack service create --name <service_name> <service_type>
+identity:create_service: "role:admin or ((role:managerB or role:managerC) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack user create --password <password> <user_name>
+identity:create_user: "role:admin or ((role:managerA or role:managerB or role:managerC or role:managerD or role:memberB) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack domain delete <domain>
+identity:delete_domain: "role:admin or ((role:managerD or role:managerE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack group delete <group>
+identity:delete_group: "role:admin or ((role:memberD or role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack project delete <project>
+identity:delete_project: "role:admin or ((role:managerD or role:managerE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack role delete <role>
+identity:delete_role: "role:admin or ((role:managerA or role:managerB or role:memberA or role:memberB) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack service delete <service>
+identity:delete_service: "role:admin or ((role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack user delete <user>
+identity:delete_user: "role:admin or ((role:managerA or role:managerB or role:managerC or role:managerD or role:managerE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack domain list
+identity:list_domains: "role:admin or ((role:memberA or role:memberB) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack group list
+identity:list_groups: "role:admin or ((role:managerA or role:managerE or role:memberD or role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack project list
+identity:list_projects: "role:admin or ((role:managerA or role:memberA or role:memberB or role:memberC or role:memberD) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack role list
+identity:list_roles: "role:admin or ((role:memberA or role:memberB or role:memberC or role:memberD) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack service list
+identity:list_services: "role:admin or ((role:memberA or role:memberB or role:memberC or role:memberD) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack user list
+identity:list_users: "role:admin or ((role:managerA or role:managerB or role:managerC or role:managerD or role:memberA) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack domain set --name <new_name> <domain>
+identity:update_domain: "role:admin or ((role:memberB or role:memberC) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack group set --name <new_name> <group>
+identity:update_group: "role:admin or ((role:managerB or role:managerC or role:memberA or role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack project set --name <new_name> <project>
+identity:update_project: "role:admin or ((role:memberA or role:memberB or role:memberC) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack role set --name <new_name> <role>
+identity:update_role: "role:admin or ((role:managerC or role:memberB or role:memberC or role:memberD or role:memberE) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"
+# cmd: openstack user set --name <new_name> <user>
+identity:update_user: "role:admin or ((role:managerB or role:managerC or role:memberA or role:memberB) and project_id:b5c386f2b477440ba83fc0ca0500c2bb)"

@@ -66,6 +66,16 @@ ERROR_TEMPLATES: Dict[str, Dict[str, str]] = {
         "fault_type": "API Over Authorization",
         "fault_info": "{api} is used",
         "recommendation": "Delete the {policy}"
+    },
+    "12": {
+        "fault_type": "高低权限错配",
+        "fault_info": "{api} should not assigned to {roles} in {project_name}",
+        "recommendation": "【Warning】 Delete the {roles} in {project_name}, and create a new user in {low_roles} to used"
+    },
+    "13": {
+        "fault_type": "敏感权限错配",
+        "fault_info": "{api} should not assigned to {roles} in {project_name}",
+        "recommendation": "【Warning】检查 API是否应该授予{roles} 在 {project_name}"
     }
 }
 

@@ -4,6 +4,7 @@ import re
 import hashlib
 
 from output_control import general_print as print
+from policy_parser import PolicyRuleParser
 
 class PolicyGraphCreator:
     def __init__(self, uri: str, user: str, password: str):
@@ -46,6 +47,30 @@ class PolicyGraphCreator:
         expr = re.sub(r'\band\b', 'and', expr, flags=re.IGNORECASE)
         expr = re.sub(r'\bor\b', 'or', expr, flags=re.IGNORECASE)
         return expr
+
+    def _unit_to_expression(self, unit: Dict[str, List[str]]) -> str:
+        parts = []
+        for key in sorted(unit.keys()):
+            values = [str(v) for v in unit.get(key, []) if v]
+            for value in values:
+                parts.append(f"{key}:{value}")
+        return " and ".join(parts)
+
+    def _expand_to_min_units(self, rule_expr: str, parser: PolicyRuleParser) -> List[str]:
+        parsed = parser.parse_single_policy("policy", rule_expr)
+        if parsed is None:
+            return [rule_expr]
+        units = parser._extract_minimal_units(parsed)
+        if not units:
+            return [rule_expr]
+        expressions = []
+        for unit in units:
+            if not unit:
+                continue
+            unit_expr = self._unit_to_expression(unit)
+            if unit_expr:
+                expressions.append(unit_expr)
+        return expressions or [rule_expr]
     
     def get_or_create_rule_id(self, rule_expr: str) -> Tuple[str, bool]:
         """
@@ -147,6 +172,8 @@ class PolicyGraphCreator:
             # 统计重复规则
             rule_usage_count = {}
             
+            parser = PolicyRuleParser()
+
             for policy_key, policy_entry in policy_dict.items():
                 rules = policy_entry.get('expressions', [])
                 metadata = policy_entry.get('metadata', {})
@@ -188,89 +215,91 @@ class PolicyGraphCreator:
                 
                 # 处理每个规则
                 for rule_idx, rule_expr in enumerate(rules, 1):
-                    # 获取或创建规则ID
-                    rule_name, is_new = self.get_or_create_rule_id(rule_expr)
-                    rule_node_id = f"rule:{rule_name}"
-                    normalized_expr = self.normalize_expression(rule_expr)
-                    
-                    # 统计规则使用次数
-                    if normalized_expr not in rule_usage_count:
-                        rule_usage_count[normalized_expr] = {'rule_name': rule_name, 'count': 0, 'policies': []}
-                    rule_usage_count[normalized_expr]['count'] += 1
-                    rule_usage_count[normalized_expr]['policies'].append(root_name)
-                    
-                    # 只在首次创建规则节点
-                    if rule_node_id not in created_rules:
-                        session.run(
-                            """
-                            MERGE (r:RuleNode {
-                                id: $id, 
-                                name: $name, 
-                                expression: $expr,
-                                normalized_expression: $normalized_expr
-                            })
-                            """,
-                            id=rule_node_id,
-                            name=rule_name,
-                            expr=rule_expr,
-                            normalized_expr=normalized_expr
-                        )
-                        created_rules.add(rule_node_id)
-                        print(f"  创建规则节点: {rule_name} - {rule_expr}")
+                    unit_exprs = self._expand_to_min_units(rule_expr, parser)
+                    for unit_expr in unit_exprs:
+                        # 获取或创建规则ID
+                        rule_name, is_new = self.get_or_create_rule_id(unit_expr)
+                        rule_node_id = f"rule:{rule_name}"
+                        normalized_expr = self.normalize_expression(unit_expr)
                         
-                        # 只在创建规则节点时解析并创建条件关系
-                        rule_nodes = self.parse_rule_expression(rule_expr)
+                        # 统计规则使用次数
+                        if normalized_expr not in rule_usage_count:
+                            rule_usage_count[normalized_expr] = {'rule_name': rule_name, 'count': 0, 'policies': []}
+                        rule_usage_count[normalized_expr]['count'] += 1
+                        rule_usage_count[normalized_expr]['policies'].append(root_name)
                         
-                        for node_type, node_name in rule_nodes:
-                            node_id = f"{node_type}:{node_name}"
-                            node_label = self.get_condition_label(node_type)
+                        # 只在首次创建规则节点
+                        if rule_node_id not in created_rules:
+                            session.run(
+                                """
+                                MERGE (r:RuleNode {
+                                    id: $id, 
+                                    name: $name, 
+                                    expression: $expr,
+                                    normalized_expression: $normalized_expr
+                                })
+                                """,
+                                id=rule_node_id,
+                                name=rule_name,
+                                expr=unit_expr,
+                                normalized_expr=normalized_expr
+                            )
+                            created_rules.add(rule_node_id)
+                            print(f"  创建规则节点: {rule_name} - {unit_expr}")
                             
-                            # 创建条件节点（如果不存在）
-                            if node_id not in created_nodes_by_type.get(node_type, set()):
+                            # 只在创建规则节点时解析并创建条件关系
+                            rule_nodes = self.parse_rule_expression(unit_expr)
+                            
+                            for node_type, node_name in rule_nodes:
+                                node_id = f"{node_type}:{node_name}"
+                                node_label = self.get_condition_label(node_type)
+                                
+                                # 创建条件节点（如果不存在）
+                                if node_id not in created_nodes_by_type.get(node_type, set()):
+                                    session.run(
+                                        f"""
+                                        MERGE (n:ConditionNode:{node_label} {{
+                                            id: $id, 
+                                            type: $type, 
+                                            name: $name
+                                        }})
+                                        """,
+                                        id=node_id,
+                                        type=node_type,
+                                        name=node_name
+                                    )
+                                    if node_type not in created_nodes_by_type:
+                                        created_nodes_by_type[node_type] = set()
+                                    created_nodes_by_type[node_type].add(node_id)
+                                    print(f"    创建条件节点 [{node_label}]: {node_name}")
+                                
+                                # 创建从规则到条件节点的关系
+                                rel_key = re.sub(r'[^0-9a-zA-Z]+', '_', node_type).upper()
+                                if not rel_key:
+                                    rel_key = "GENERIC"
+                                relationship_name = f"REQUIRES_{rel_key}"
                                 session.run(
                                     f"""
-                                    MERGE (n:ConditionNode:{node_label} {{
-                                        id: $id, 
-                                        type: $type, 
-                                        name: $name
-                                    }})
+                                    MATCH (rule:RuleNode {{id: $rule_id}})
+                                    MATCH (cond:ConditionNode:{node_label} {{id: $cond_id}})
+                                    MERGE (rule)-[:{relationship_name}]->(cond)
                                     """,
-                                    id=node_id,
-                                    type=node_type,
-                                    name=node_name
+                                    rule_id=rule_node_id,
+                                    cond_id=node_id
                                 )
-                                if node_type not in created_nodes_by_type:
-                                    created_nodes_by_type[node_type] = set()
-                                created_nodes_by_type[node_type].add(node_id)
-                                print(f"    创建条件节点 [{node_label}]: {node_name}")
-                            
-                            # 创建从规则到条件节点的关系
-                            rel_key = re.sub(r'[^0-9a-zA-Z]+', '_', node_type).upper()
-                            if not rel_key:
-                                rel_key = "GENERIC"
-                            relationship_name = f"REQUIRES_{rel_key}"
-                            session.run(
-                                f"""
-                                MATCH (rule:RuleNode {{id: $rule_id}})
-                                MATCH (cond:ConditionNode:{node_label} {{id: $cond_id}})
-                                MERGE (rule)-[:{relationship_name}]->(cond)
-                                """,
-                                rule_id=rule_node_id,
-                                cond_id=node_id
-                            )
-                    else:
-                        print(f"  复用已存在的规则节点: {rule_name} - {rule_expr}")
-                    
-                    # 创建从策略节点到规则节点的关系（每次都创建，因为不同策略可能使用相同规则）
-                    session.run(
-                        f"""
-                        MATCH (policy:PolicyNode:{root_label} {{id: $policy_id}})
-                        MATCH (rule:RuleNode {{id: $rule_id}})
-                        MERGE (policy)-[:HAS_RULE]->(rule)
-                        """,
-                        policy_id=root_node_id,
-                        rule_id=rule_node_id
-                    )
+                        else:
+                            print(f"  复用已存在的规则节点: {rule_name} - {unit_expr}")
+                        
+                        # 创建从策略节点到规则节点的关系（每次都创建，因为不同策略可能使用相同规则）
+                        session.run(
+                            f"""
+                            MATCH (policy:PolicyNode:{root_label} {{id: $policy_id}})
+                            MATCH (rule:RuleNode {{id: $rule_id}})
+                            MERGE (policy)-[:HAS_RULE]->(rule)
+                            """,
+                            policy_id=root_node_id,
+                            rule_id=rule_node_id
+                        )
             
             # 统计信息
             total_nodes = sum(len(nodes) for nodes in created_nodes_by_type.values())
