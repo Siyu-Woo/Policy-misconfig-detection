@@ -3,14 +3,19 @@
 ## 1. 环境变量示例
 - admin（密码为 `admin`，默认域 Default，Keystone 地址 http://127.0.0.1:5000/v3）  
   ```bash
-  export OS_USERNAME=admin
   export OS_PASSWORD=admin
-  export OS_USER_DOMAIN_NAME=Default
   export OS_PROJECT_NAME=admin
+  export OS_USER_DOMAIN_NAME=Default
   export OS_PROJECT_DOMAIN_NAME=Default
-  export OS_AUTH_URL=http://127.0.0.1:5000/v3
-  export OS_REGION_NAME=RegionOne
+  export OS_AUTH_URL=http://localhost:5000/v3
+  export OS_IDENTITY_API_VERSION=3
+  export OS_IMAGE_API_VERSION=2
+  export OS_INTERFACE=internal
   ```
+  ```bash
+  source /opt/openstack/envinfo/admin-openrc.sh
+  ```
+
 - newuser（默认域 Default，示例切到 demo-project）  
   ```bash
   export OS_USERNAME=newuser
@@ -20,6 +25,9 @@
   export OS_PROJECT_DOMAIN_NAME=Default
   export OS_AUTH_URL=http://127.0.0.1:5000/v3
   export OS_REGION_NAME=RegionOne
+  ```
+  ```bash
+  source /opt/openstack/envinfo/newuser-openrc.sh
   ```
 
 - manager（默认域 Default，示例切到 demo-project）  
@@ -34,7 +42,25 @@
   export OS_PROJECT_NAME=demo-project
   export OS_PROJECT_DOMAIN_NAME=Default
   ```
+  ```bash
+  source /opt/openstack/envinfo/manager-openrc.sh
+  ```
 
+- member（默认域 Default，示例切到 demo-project）  
+  ```bash
+  export OS_AUTH_URL=http://127.0.0.1:5000/v3
+  export OS_IDENTITY_API_VERSION=3
+  export OS_REGION_NAME=RegionOne
+  export OS_INTERFACE=internal
+  export OS_USERNAME=member
+  export OS_PASSWORD=MyPass123
+  export OS_USER_DOMAIN_NAME=Default
+  export OS_PROJECT_NAME=demo-project
+  export OS_PROJECT_DOMAIN_NAME=Default
+  ```
+  ```bash
+  source /opt/openstack/envinfo/member-openrc.sh
+  ```
 
 ## 2. 切换用户与查看当前身份
 - 切换：设置（或 source 对应 openrc）新的 `OS_USERNAME/OS_PASSWORD/OS_PROJECT_NAME/...` 环境变量。

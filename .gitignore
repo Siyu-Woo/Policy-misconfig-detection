@@ -43,6 +43,8 @@ log/
 *.tmp
 *.temp
 .cache/
+Web/TempFile/
+Web/Backbone/.sudo_pass
 
 # Database files and server state (exclude from git as they're large and environment-specific)
 env-docker/server\ state/

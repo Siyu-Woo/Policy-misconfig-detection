@@ -14,8 +14,8 @@ import os
 import re
 from typing import Dict, Optional, List
 
-LOG_PATH = "/var/log/keystone/keystone.log"
-OUTPUT_PATH = "/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv"
+LOG_PATH = "/var/log/keystone/keystoneCollect.log"
+OUTPUT_PATH = "/root/policy-fileparser/data/assistfile/rbac_audit_keystoneCollect.csv"
 
 RBAC_PATTERN = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+\d+\s+\w+\s+"
@@ -153,10 +153,10 @@ def main() -> None:
 
     records = build_records()
     if not records:
-        print("未在日志中找到 RBAC 记录。")
+        print("File parsing completed")
         return
     write_csv(records)
-    print(f"已生成 {len(records)} 条记录 -> {OUTPUT_PATH}")
+    print("File parsing completed")
 
 
 if __name__ == "__main__":

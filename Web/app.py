@@ -1,311 +1,326 @@
 import os
-import shutil
-import subprocess
-import re
-import yaml
-import json
-import sys
-import traceback
-from flask import Flask, render_template, request, jsonify
-from neo4j import GraphDatabase
+
+from flask import Flask, jsonify, render_template, request
+from werkzeug.utils import secure_filename
+
+from Backbone import config
+from Backbone.check_ops import run_dynamic_check, run_static_check
+from Backbone.container_ops import exec_terminal_command, get_container_status, restart_container, switch_context
+from Backbone.graph_ops import get_graph_data, get_graph_stats
+from Backbone.log_ops import choose_default_log_file, ensure_log_in_container, export_log, import_log_file, list_log_files, parse_rbac_log
+from Backbone.openstack_ops import collect_env_options, collect_env_overview
+from Backbone.policy_ops import (
+    apply_policy_to_container,
+    choose_default_policy_file,
+    ensure_policy_in_container,
+    export_policy,
+    import_policy_file,
+    list_policy_files,
+    parse_policy_file,
+    restart_keystone,
+    run_policy_pipeline,
+)
+from Backbone.state import STATE
 
 app = Flask(__name__)
+app.config["JSON_SORT_KEYS"] = False
 
-# --- 配置路径 ---
-UPLOAD_FOLDER = '/etc/openstack/policies'
-PROJECT_ROOT = '/root' 
-CHECK_SCRIPT = '/root/StatisticDetect/StatisticCheck.py'
-PIPELINE_SCRIPT = '/root/policy-fileparser/run_graph_pipeline.py'
 
-# 确保上传目录存在
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+def _ensure_current_files() -> None:
+    policy_file = STATE.get("current_policy_file")
+    if not policy_file or not (config.TEMP_POLICY_DIR / policy_file).exists():
+        policy_file = choose_default_policy_file()
+        STATE.set_current_file("policy", policy_file)
+        STATE.reset_policy_parse()
 
-# ================= Neo4j 配置 =================
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-# 注意：如果你之前在终端里把密码改成了 '123456'，请这里改成 '123456'
-# 如果没改过，保持 'Password'
-NEO4J_PASSWORD = "Password"  
+    log_file = STATE.get("current_log_file")
+    if not log_file or not (config.TEMP_LOG_DIR / log_file).exists():
+        log_file = choose_default_log_file()
+        STATE.set_current_file("log", log_file)
+        STATE.reset_log_parse()
 
-# 全局驱动变量 (懒加载)
-driver = None
+    STATE.save()
 
-def get_driver():
-    """获取 Neo4j 驱动实例 (单例模式)"""
-    global driver
-    if driver is None:
-        try:
-            print(f"Connecting to Neo4j at {NEO4J_URI} as {NEO4J_USER}...")
-            driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-            # 测试连接
-            driver.verify_connectivity()
-            print("Neo4j Connected Successfully!")
-        except Exception as e:
-            print(f"Failed to connect to Neo4j: {e}")
-            driver = None
-    return driver
-# ============================================
 
-def run_command(command, cwd, env):
-    print(f"\n{'='*20} START EXECUTING {'='*20}")
-    print(f"Command: {' '.join(command)}")
-    print(f"CWD: {cwd}")
-    
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=cwd
-        )
-        
-        if result.stdout:
-            print(f"--- STDOUT ---\n{result.stdout}")
-        if result.stderr:
-            print(f"--- STDERR ---\n{result.stderr}")
-        
-        if result.returncode != 0:
-            print(f"!!! EXECUTION FAILED (Return Code: {result.returncode}) !!!")
-        else:
-            print("--- EXECUTION SUCCESS ---")
-        print(f"{'='*20} END EXECUTING {'='*20}\n")
-            
-        return result
-    except Exception as e:
-        print(f"!!! EXCEPTION: {str(e)}")
-        raise e
+def _normalize_filename(filename: str, default_ext: str) -> str:
+    cleaned = secure_filename(filename)
+    if not cleaned:
+        cleaned = f"upload{default_ext}"
+    if not cleaned.lower().endswith(default_ext):
+        cleaned = f"{cleaned}{default_ext}"
+    return cleaned
 
-def parse_check_output(output_str):
-    errors = []
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    output_str = ansi_escape.sub('', output_str)
 
-    blocks = output_str.split('-' * 40)
-    
-    for block in blocks:
-        if not block.strip():
-            continue
-            
-        error_item = {
-            'type': 'Unknown',
-            'policy': '',
-            'info': '',
-            'recommendation': '',
-            'lines': [] 
-        }
-        
-        lines = block.strip().split('\n')
-        current_key = None
-        
-        for line in lines:
-            line = line.strip()
-            if not line: continue
-            
-            if line.startswith('fault type:'):
-                error_item['type'] = line.split(':', 1)[1].strip()
-            elif line.startswith('fault policy rule:'):
-                current_key = 'policy'
-            elif line.startswith('fault info:'):
-                current_key = None
-                error_item['info'] = line.split(':', 1)[1].strip()
-            elif line.startswith('recommendation:'):
-                current_key = None
-                error_item['recommendation'] = line.split(':', 1)[1].strip()
-            elif current_key == 'policy':
-                error_item['policy'] += line + "\n"
-                match = re.search(r'line\s+(\d+):', line)
-                if match:
-                    error_item['lines'].append(int(match.group(1)))
-        
-        if error_item['type'] != 'Unknown' or error_item['policy']:
-            errors.append(error_item)
-            
-    return errors
-
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = "policy.yaml" 
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        try:
-            file.save(filepath)
-            print(f"File saved to: {filepath}")
-        except Exception as e:
-            print(f"Failed to save file: {e}")
-            return jsonify({'success': False, 'error': f"File save failed: {str(e)}"}), 500
-        
-        env = os.environ.copy()
-        env['PYTHONPATH'] = f"/root:{env.get('PYTHONPATH', '')}"
-        
-        try:
-            result = run_command(
-                ['python3', PIPELINE_SCRIPT],
-                cwd='/root/policy-fileparser', 
-                env=env
-            )
-            
-            if result.returncode != 0:
-                return jsonify({
-                    'success': False, 
-                    'error': f"Script Error: {result.stderr}",
-                    'log': result.stdout
-                }), 500
-            
-            return jsonify({
-                'success': True,
-                'log': result.stdout,
-                'error_log': result.stderr
-            })
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/get_file_content')
-def get_file_content():
-    filepath = os.path.join(UPLOAD_FOLDER, 'policy.yaml')
-    if not os.path.exists(filepath):
-        return jsonify({'error': 'File not found'}), 404
-    
-    with open(filepath, 'r') as f:
-        content = f.read()
-    
-    lines = content.split('\n')
-    excel_data = []
-    
-    for idx, line in enumerate(lines):
-        line_clean = line.strip()
-        if ':' in line_clean and not line_clean.startswith('#'):
-            parts = line_clean.split(':', 1)
-            if len(parts) >= 2:
-                name = parts[0].strip().strip('"').strip("'")
-                rule = parts[1].strip().strip('"').strip("'")
-                excel_data.append({
-                    'line': idx + 1,
-                    'name': name,
-                    'rule': rule
-                })
-            
-    return jsonify({
-        'raw_content': content,
-        'excel_data': excel_data
-    })
-
-@app.route('/run_check')
-def run_check():
-    env = os.environ.copy()
-    env['PYTHONPATH'] = f"/root:{env.get('PYTHONPATH', '')}"
-    
-    all_outputs = ""
-    print("\n>>> STARTING SECURITY CHECK SEQUENCE <<<")
-
-    res1 = run_command(
-        ['python3', PIPELINE_SCRIPT, '--show-check-report'],
-        cwd='/root/policy-fileparser',
-        env=env
+@app.route("/api/state")
+def api_state():
+    _ensure_current_files()
+    return jsonify(
+        {
+            "container": get_container_status(),
+            "context": STATE.get("context"),
+            "files": {
+                "policy": list_policy_files(),
+                "log": list_log_files(),
+            },
+            "current": {
+                "policy": STATE.get("current_policy_file"),
+                "log": STATE.get("current_log_file"),
+            },
+            "policy_parse": STATE.get("policy_parse"),
+            "log_parse": STATE.get("log_parse"),
+            "checks": STATE.get("checks"),
+            "env_options": STATE.get("env_options"),
+        }
     )
-    all_outputs += res1.stdout
-    if res1.stderr:
-        print(f"Pipeline Stderr: {res1.stderr}")
 
-    res2 = run_command(
-        ['python3', CHECK_SCRIPT],
-        cwd='/root/StatisticDetect',
-        env=env
+
+@app.route("/api/status")
+def api_status():
+    return jsonify({"container": get_container_status(), "context": STATE.get("context")})
+
+
+@app.route("/api/context", methods=["POST"])
+def api_context():
+    payload = request.get_json(silent=True) or {}
+    user = payload.get("user")
+    project = payload.get("project")
+    domain = payload.get("domain")
+    context = switch_context(user=user, project=project, domain=domain)
+    return jsonify(context)
+
+
+@app.route("/api/context/options")
+def api_context_options():
+    refresh = request.args.get("refresh") == "1"
+    cached = STATE.get("env_options", {})
+    if cached.get("ready") and not refresh:
+        return jsonify(cached)
+    options = collect_env_options()
+    STATE.set_env_options(
+        users=options.get("users", []),
+        projects=options.get("projects", []),
+        domains=options.get("domains", []),
     )
-    all_outputs += res2.stdout
-    if res2.stderr:
-        print(f"Statistic Stderr: {res2.stderr}")
+    STATE.save()
+    return jsonify(STATE.get("env_options"))
 
-    print(">>> CHECK SEQUENCE FINISHED. PARSING OUTPUT... <<<")
 
-    parsed_errors = parse_check_output(all_outputs)
-    
-    summary = {
-        'total': len(parsed_errors),
-        'by_type': {}
-    }
-    for err in parsed_errors:
-        t = err['type']
-        summary['by_type'][t] = summary['by_type'].get(t, 0) + 1
-        
-    return jsonify({
-        'errors': parsed_errors,
-        'summary': summary,
-        'raw_log': all_outputs
-    })
+@app.route("/api/terminal", methods=["POST"])
+def api_terminal():
+    payload = request.get_json(silent=True) or {}
+    command = (payload.get("command") or "").strip()
+    if not command:
+        return jsonify({"error": "empty command"}), 400
+    result = exec_terminal_command(command)
+    return jsonify(result)
 
-@app.route('/get_graph_data')
-def get_graph_data():
-    """
-    后端直接连接 Neo4j，获取数据并转换为 Vis.js 格式
-    """
+
+@app.route("/api/container/restart", methods=["POST"])
+def api_container_restart():
+    result = restart_container()
+    return jsonify(result)
+
+
+@app.route("/api/export/policy", methods=["POST"])
+def api_export_policy():
+    result = export_policy()
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@app.route("/api/export/log", methods=["POST"])
+def api_export_log():
+    result = export_log()
+    return jsonify(result)
+
+
+@app.route("/api/import/policy", methods=["POST"])
+def api_import_policy():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    file = request.files["file"]
+    filename = _normalize_filename(file.filename or "policy.yaml", ".yaml")
+    content = file.read()
+    stored = import_policy_file(filename, content)
+    return jsonify({"file": stored})
+
+
+@app.route("/api/import/log", methods=["POST"])
+def api_import_log():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    file = request.files["file"]
+    filename = _normalize_filename(file.filename or "keystone.log", ".log")
+    content = file.read()
+    stored = import_log_file(filename, content)
+    return jsonify({"file": stored})
+
+
+@app.route("/api/apply/policy", methods=["POST"])
+def api_apply_policy():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    file = request.files["file"]
+    filename = _normalize_filename(file.filename or "policy.yaml", ".yaml")
+    content = file.read()
+    stored = import_policy_file(filename, content)
+
+    restart_log = restart_container()
+    path = config.TEMP_POLICY_DIR / stored
+    result = apply_policy_to_container(str(path))
+    keystone = restart_keystone()
+    return jsonify({"file": stored, "restart": restart_log, "apply": result, "keystone": keystone})
+
+
+@app.route("/api/files/select", methods=["POST"])
+def api_select_file():
+    payload = request.get_json(silent=True) or {}
+    file_type = payload.get("type")
+    filename = payload.get("filename")
+    if file_type not in ("policy", "log"):
+        return jsonify({"error": "invalid type"}), 400
+    STATE.set_current_file(file_type, filename)
+    if file_type == "policy":
+        STATE.reset_policy_parse()
+    else:
+        STATE.reset_log_parse()
+    STATE.reset_checks()
+    STATE.save()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/file/content")
+def api_file_content():
+    file_type = request.args.get("type")
+    filename = request.args.get("filename")
+    if file_type not in ("policy", "log"):
+        return jsonify({"error": "invalid type"}), 400
+    if not filename:
+        return jsonify({"error": "missing filename"}), 400
+    directory = config.TEMP_POLICY_DIR if file_type == "policy" else config.TEMP_LOG_DIR
+    path = directory / filename
+    if not path.exists():
+        return jsonify({"error": "file not found"}), 404
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    return jsonify({"filename": filename, "content": content})
+
+
+@app.route("/api/policy/parse", methods=["POST"])
+def api_parse_policy():
+    _ensure_current_files()
+    filename = STATE.get("current_policy_file")
+    if not filename:
+        return jsonify({"error": "no policy file"}), 400
+    payload = request.get_json(silent=True) or {}
+    force = payload.get("force", False)
+    cached = STATE.get("policy_parse", {})
+    if cached.get("ready") and cached.get("file") == filename and not force:
+        return jsonify(cached)
+
+    path = config.TEMP_POLICY_DIR / filename
+
+    ensure_policy_in_container(path)
+    pipeline_log = run_policy_pipeline()
+    excel = parse_policy_file(path)
+    stats = {}
     try:
-        # 获取驱动（如果失败则返回 None）
-        drv = get_driver()
-        if not drv:
-            return jsonify({"error": "Neo4j driver initialization failed. Check server logs for details."}), 500
+        stats = get_graph_stats()
+    except Exception:
+        stats = {}
 
-        query = "MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 300"
-        
-        nodes = []
-        edges = []
-        node_ids = set()
+    summary = {"lines": len(excel)}
+    STATE.set_policy_parse(filename, excel, stats, summary)
+    STATE.save()
+    payload = dict(STATE.get("policy_parse") or {})
+    payload["log"] = pipeline_log
+    return jsonify(payload)
 
-        def serialize_node(node):
-            label = list(node.labels)[0] if node.labels else "Node"
-            color = "#97c2fc"
-            if "PolicyNode" in node.labels: color = "#ffcccc"
-            elif "RuleNode" in node.labels: color = "#ccffcc"
-            elif "ConditionNode" in node.labels: color = "#ffffcc"
-            
-            label_prop = node.get("name") or node.get("expression") or str(node.id)
-            
-            return {
-                "id": node.id,
-                "label": label_prop,
-                "group": label,
-                "color": color,
-                "title": str(dict(node))
-            }
 
-        with drv.session() as session:
-            result = session.run(query)
-            for record in result:
-                n, r, m = record["n"], record["r"], record["m"]
-                
-                if n.id not in node_ids:
-                    nodes.append(serialize_node(n))
-                    node_ids.add(n.id)
-                
-                if m.id not in node_ids:
-                    nodes.append(serialize_node(m))
-                    node_ids.add(m.id)
-                
-                edges.append({
-                    "from": n.id,
-                    "to": m.id,
-                    "label": type(r).__name__,
-                    "arrows": "to"
-                })
-                
-        return jsonify({"nodes": nodes, "edges": edges})
+@app.route("/api/log/parse", methods=["POST"])
+def api_parse_log():
+    _ensure_current_files()
+    filename = STATE.get("current_log_file")
+    if not filename:
+        return jsonify({"error": "no log file"}), 400
+    payload = request.get_json(silent=True) or {}
+    force = payload.get("force", False)
+    cached = STATE.get("log_parse", {})
+    if cached.get("ready") and cached.get("file") == filename and not force:
+        return jsonify(cached)
 
-    except Exception as e:
-        # 关键：打印详细错误堆栈到终端，方便调试
-        print("!!! GRAPH DATA ERROR !!!")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    path = config.TEMP_LOG_DIR / filename
 
-if __name__ == '__main__':
-    # 监听 0.0.0.0:80
-    app.run(host='0.0.0.0', port=80, debug=True)
+    ensure_log_in_container(path)
+    parsed = parse_rbac_log()
+    rows = parsed.get("rows", [])
+
+    summary = {"rows": len(rows)}
+    STATE.set_log_parse(filename, rows, summary)
+    STATE.save()
+    return jsonify(STATE.get("log_parse"))
+
+
+@app.route("/api/graph")
+def api_graph():
+    try:
+        data = get_graph_data()
+        return jsonify(data)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/check/static", methods=["POST"])
+def api_check_static():
+    policy_state = STATE.get("policy_parse", {})
+    current_policy = STATE.get("current_policy_file")
+    if not policy_state.get("ready") or policy_state.get("file") != current_policy:
+        return jsonify({"error": "policy not parsed"}), 400
+    payload = request.get_json(silent=True) or {}
+    force = payload.get("force", False)
+    cached = STATE.get("checks", {}).get("static", {})
+    if cached.get("ready") and not force:
+        return jsonify(cached)
+
+    result = run_static_check()
+    STATE.set_check_result("static", result["errors"], result["summary"])
+    STATE.save()
+    return jsonify(result)
+
+
+@app.route("/api/check/dynamic", methods=["POST"])
+def api_check_dynamic():
+    policy_state = STATE.get("policy_parse", {})
+    log_state = STATE.get("log_parse", {})
+    current_policy = STATE.get("current_policy_file")
+    current_log = STATE.get("current_log_file")
+    if not policy_state.get("ready") or policy_state.get("file") != current_policy:
+        return jsonify({"error": "policy not parsed"}), 400
+    if not log_state.get("ready") or log_state.get("file") != current_log:
+        return jsonify({"error": "log not parsed"}), 400
+    payload = request.get_json(silent=True) or {}
+    force = payload.get("force", False)
+    cached = STATE.get("checks", {}).get("dynamic", {})
+    if cached.get("ready") and not force:
+        return jsonify(cached)
+
+    result = run_dynamic_check()
+    STATE.set_check_result("dynamic", result["errors"], result["summary"])
+    STATE.save()
+    return jsonify(result)
+
+
+@app.route("/api/env/overview")
+def api_env_overview():
+    overview = collect_env_overview()
+    return jsonify(overview)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("WEB_PORT", "20175"))
+    app.run(host="0.0.0.0", port=port, debug=True)

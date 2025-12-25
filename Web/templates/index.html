@@ -1,162 +1,244 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Policy Misconfig Detection</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body class="text-slate-700 antialiased" x-data="appData()">
+<body>
+    <div class="ambient-layer"></div>
+    <div class="ambient-glow"></div>
 
-    <div class="ambient-light"></div>
-
-    <div class="min-h-screen flex flex-col items-center justify-center p-6 relative">
-
-        <div :class="{'fixed bottom-8 right-8 z-50 transition-all duration-500': state !== 'initial', 'relative z-10': state === 'initial'}">
-            <label class="cursor-pointer group relative flex items-center justify-center">
-                <input type="file" class="hidden" @change="handleUpload" accept=".yaml,.yml">
-                <div class="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-2xl transition-transform transform group-hover:scale-105 active:scale-95">
-                    <span x-html="state === 'initial' ? icons.add : icons.restart"></span>
-                </div>
-            </label>
-        </div>
-
-        <div x-show="state === 'processing'" class="text-center z-20" style="display: none;">
-            <div class="relative w-24 h-24 mx-auto mb-6">
-                <div class="absolute inset-0 bg-indigo-100 rounded-full animate-ping opacity-75"></div>
-                <div class="relative w-full h-full flex items-center justify-center">
-                    <span class="text-indigo-600" x-html="icons.loading"></span>
-                </div>
+    <div class="app-shell">
+        <header class="app-header">
+            <div class="brand">Policy Misconfig Detection</div>
+            <div class="mode-toggle" id="mode-toggle">
+                <button data-mode="run" class="active">运行模拟</button>
+                <button data-mode="manage">管理中心</button>
             </div>
-            <h2 class="text-xl font-light text-slate-800 tracking-wide">Parsing Policy Graph...</h2>
-        </div>
-
-        <div x-show="state === 'result'" class="w-full max-w-6xl h-[85vh] flex flex-col glass-panel rounded-3xl overflow-hidden transition-all duration-700" style="display: none;">
-            
-            <div class="h-16 border-b border-white/50 flex items-center justify-between px-6 bg-white/40 backdrop-blur-md">
-                <div class="flex space-x-2 bg-slate-100/50 p-1 rounded-xl">
-                    <button @click="switchTab('code')" 
-                        :class="{'bg-white shadow-sm text-slate-800': tab==='code', 'text-slate-400 hover:text-slate-600': tab!=='code'}" 
-                        class="p-2 rounded-lg transition-all" title="Code">
-                        <span class="w-5 h-5 block" x-html="icons.code"></span>
-                    </button>
-                    <button @click="switchTab('excel')" 
-                        :class="{'bg-white shadow-sm text-slate-800': tab==='excel', 'text-slate-400 hover:text-slate-600': tab!=='excel'}" 
-                        class="p-2 rounded-lg transition-all" title="Excel">
-                        <span class="w-5 h-5 block" x-html="icons.excel"></span>
-                    </button>
-                    <button @click="switchTab('graph')" 
-                        :class="{'bg-white shadow-sm text-slate-800': tab==='graph', 'text-slate-400 hover:text-slate-600': tab!=='graph'}" 
-                        class="p-2 rounded-lg transition-all" title="Graph">
-                        <span class="w-5 h-5 block" x-html="icons.graph"></span>
-                    </button>
-                </div>
-                <div class="text-xs font-mono text-slate-400">policy.yaml</div>
+            <div class="status-line" id="global-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Docker: 检查中</span>
             </div>
+        </header>
 
-            <div class="flex-1 overflow-hidden relative bg-white/30">
-                <div x-show="tab === 'code'" class="h-full overflow-auto p-6 bg-white/60">
-                    <pre class="language-yaml !bg-transparent !m-0 !p-0 text-sm"><code id="code-block" class="language-yaml"></code></pre>
-                </div>
-                <div x-show="tab === 'excel'" class="h-full overflow-auto">
-                    <table class="w-full text-left text-sm border-collapse">
-                        <thead class="bg-slate-50 sticky top-0 z-10 shadow-sm text-slate-500 font-medium backdrop-blur bg-opacity-90">
-                            <tr>
-                                <th class="p-4 w-20 text-center">#</th>
-                                <th class="p-4 border-l border-slate-200">Policy Name</th>
-                                <th class="p-4 border-l border-slate-200">Rule Expression</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100 bg-white">
-                            <template x-for="row in excelData" :key="row.line">
-                                <tr :class="getRowClass(row.line)" :style="getRowStyle(row.line)" class="hover:bg-slate-50 transition-all duration-200">
-                                    <td class="p-3 text-center opacity-60 font-mono" x-text="row.line"></td>
-                                    <td class="p-3 font-medium font-mono" x-text="row.name"></td>
-                                    <td class="p-3 opacity-80 font-mono" x-text="row.rule"></td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-                <div x-show="tab === 'graph'" class="h-full w-full relative bg-slate-50/50">
-                    <div id="viz" class="w-full h-full"></div>
-                </div>
-            </div>
-
-            <div class="border-t border-white/50 bg-white/80 backdrop-blur p-4 relative z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-6">
-                        <button @click="runCheck" :disabled="checking" class="flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-slate-200">
-                            <span x-show="!checking" x-html="icons.check" class="w-4 h-4"></span>
-                            <span x-show="checking" x-html="icons.loadingSmall" class="w-4 h-4 animate-spin"></span>
-                            <span x-text="checking ? 'Running...' : 'Run Security Check'"></span>
-                        </button>
-                        
-                        <div x-show="checkResult" class="flex items-center space-x-4 text-sm animate-fade-in" x-transition>
-                            <div class="flex items-center space-x-2 text-slate-800 font-bold bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
-                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
-                                <span>Issues: <b x-text="checkResult?.summary?.total"></b></span>
+        <main class="app-main">
+            <section class="view active" id="run-view">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="context-info">
+                            <div class="context-pill" id="context-pill">
+                                <span id="context-host">Docker</span>
+                                <span id="context-user">admin</span>
+                                <span id="context-domain">Default</span>
                             </div>
-                            <div class="flex space-x-3 text-slate-500 text-xs">
-                                <template x-for="(count, type) in checkResult?.summary?.by_type" :key="type">
-                                    <div class="flex items-center space-x-1 bg-slate-100 px-2 py-1 rounded">
-                                        <span class="w-2 h-2 rounded-full" :class="getTheme(type).bg.replace('bg-', 'bg-').replace('50', '400')"></span>
-                                        <span x-text="type + ':'"></span>
-                                        <strong x-text="count"></strong>
-                                    </div>
-                                </template>
+                            <div class="inline-toolbar">
+                                <label class="select-field">
+                                    <span>用户</span>
+                                    <select id="user-select"></select>
+                                </label>
+                                <label class="select-field">
+                                    <span>域</span>
+                                    <select id="domain-select"></select>
+                                </label>
+                                <button class="icon-button" id="container-restart">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="1 4 1 10 7 10"></polyline>
+                                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                                    </svg>
+                                    重启容器
+                                </button>
                             </div>
+                        </div>
+                        <div class="context-actions">
+                            <button class="icon-button" id="export-policy">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                导出 policy
+                            </button>
+                            <button class="icon-button" id="export-log">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                                导出 log
+                            </button>
+                            <label class="icon-button primary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                导入 policy
+                                <input type="file" id="import-policy" accept=".yaml,.yml" hidden>
+                            </label>
+                            <button class="icon-button" id="fetch-overview">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="10" width="4" height="10"></rect>
+                                    <rect x="10" y="6" width="4" height="14"></rect>
+                                    <rect x="17" y="3" width="4" height="17"></rect>
+                                </svg>
+                                环境统计
+                            </button>
                         </div>
                     </div>
-                    
-                    <button x-show="checkResult && checkResult.summary.total > 0" @click="showCards = !showCards" class="text-slate-400 hover:text-slate-800 transition-transform p-2" :class="{'rotate-180': !showCards}">
-                        <span x-html="icons.chevronUp" class="w-5 h-5"></span>
-                    </button>
-                </div>
-
-                <div x-show="showCards && checkResult" class="mt-4 space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar" 
-                     x-transition:enter="transition ease-out duration-300"
-                     x-transition:enter-start="opacity-0 translate-y-4"
-                     x-transition:enter-end="opacity-100 translate-y-0">
-                    
-                    <template x-for="(err, idx) in checkResult?.errors" :key="idx">
-                        <div @click="toggleFocus(idx)" 
-                             class="bg-white border border-slate-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden group active:scale-[0.99]"
-                             :class="focusedErrorIdx === idx ? 'ring-2 ring-blue-500/20 shadow-md' : ''">
-                            
-                            <div class="absolute left-0 top-0 bottom-0 w-1.5 transition-colors" 
-                                 :class="getTheme(err.type).bg.replace('bg-', 'bg-').replace('50', '500')"></div>
-
-                            <div class="pl-3">
-                                <div class="flex justify-between items-start mb-1">
-                                    <div class="flex items-center space-x-2">
-                                        <span class="text-xs font-bold px-2 py-0.5 rounded text-slate-600 bg-slate-100" x-text="err.type"></span>
-                                        <span class="text-xs text-slate-400 font-mono" x-text="'Line: ' + err.lines.join(', ')"></span>
-                                    </div>
-                                    <span class="text-xs text-slate-400 group-hover:text-blue-500 transition-colors" x-text="focusedErrorIdx === idx ? 'Focusing' : 'Click to Focus'"></span>
-                                </div>
-                                
-                                <div class="text-sm font-medium text-slate-800 mb-1" x-text="err.policy"></div>
-                                <div class="text-xs text-slate-500 mb-2" x-text="err.info"></div>
-                                
-                                <div class="text-xs p-2 rounded bg-slate-50 border border-slate-100 text-slate-600 flex items-start">
-                                    <span class="font-bold mr-1 text-slate-400">Fix:</span> 
-                                    <span x-text="err.recommendation"></span>
-                                </div>
+                    <div class="terminal">
+                        <div class="terminal-output" id="terminal-output"></div>
+                        <div class="terminal-input">
+                            <span class="prompt" id="terminal-prompt">admin@docker:$</span>
+                            <input id="terminal-input" placeholder="输入命令，回车执行" />
+                            <div class="terminal-controls">
+                                <button id="terminal-send">Run</button>
+                                <button id="terminal-clear">Clear</button>
                             </div>
                         </div>
-                    </template>
+                        <div class="inline-table" id="overview-panel"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="view" id="manage-view">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="view-tabs" id="manage-tabs">
+                            <button data-tab="files" class="active">文件展示</button>
+                            <button data-tab="policy">Policy 解析</button>
+                            <button data-tab="log">Log 解析</button>
+                            <button data-tab="checks">检测结果</button>
+                        </div>
+                        <div class="panel-actions" id="manage-actions">
+                            <button class="icon-button" id="open-import-modal">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                导入文件
+                            </button>
+                            <label class="icon-button" id="manage-import-policy-wrap">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                导入 policy
+                                <input type="file" id="manage-import-policy" accept=".yaml,.yml" hidden>
+                            </label>
+                            <label class="icon-button" id="manage-import-log-wrap">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                                导入 log
+                                <input type="file" id="manage-import-log" accept=".log,.txt" hidden>
+                            </label>
+                            <button class="icon-button" id="run-static-check">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                    <path d="M9 12l2 2 4-4"></path>
+                                </svg>
+                                静态检测
+                            </button>
+                            <button class="icon-button" id="run-dynamic-check">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="13 2 3 14 11 14 9 22 21 10 13 10"></polygon>
+                                </svg>
+                                动态检测
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="panel-body">
+                        <div class="page active" id="page-files">
+                            <div class="inline-toolbar">
+                                <div class="view-tabs" id="file-type-tabs">
+                                    <button data-type="policy" class="active">Policy</button>
+                                    <button data-type="log">Log</button>
+                                </div>
+                                <select id="file-select"></select>
+                            </div>
+                            <div class="file-viewer">
+                                <pre><code id="file-code" class="language-yaml"></code></pre>
+                            </div>
+                        </div>
+
+                        <div class="page" id="page-policy">
+                            <div class="inline-toolbar">
+                                <div class="view-tabs" id="policy-view-tabs">
+                                    <button data-view="excel" class="active">Excel</button>
+                                    <button data-view="graph">Graph</button>
+                                </div>
+                                <input id="search-api" placeholder="API" />
+                                <input id="search-role" placeholder="Role" />
+                                <input id="search-project" placeholder="Project" />
+                            </div>
+                            <div class="policy-grid">
+                                <div class="policy-table" id="policy-table"></div>
+                                <div class="graph-panel" id="graph-panel">
+                                    <div id="graph"></div>
+                                </div>
+                            </div>
+                            <div class="stats-bar" id="policy-stats"></div>
+                        </div>
+
+                        <div class="page" id="page-log">
+                            <div class="log-table" id="log-table"></div>
+                        </div>
+
+                        <div class="page" id="page-checks">
+                            <div class="view-tabs" id="check-view-tabs">
+                                <button data-check="static" class="active">静态检测</button>
+                                <button data-check="dynamic">动态检测</button>
+                            </div>
+                            <div class="check-cards" id="check-cards"></div>
+                            <div class="check-summary" id="check-summary"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="overlay" id="overlay">
+        <div class="overlay-card">
+            <div id="overlay-text">处理中...</div>
+        </div>
+        <div class="overlay-progress" aria-hidden="true"><span></span></div>
+    </div>
+
+    <div class="modal" id="import-modal">
+            <div class="modal-card">
+                <h3>导入文件</h3>
+                <p>选择导入类型</p>
+                <div class="modal-actions">
+                    <button class="icon-button primary" id="modal-import-policy">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        导入 policy
+                    </button>
+                    <button class="icon-button" id="modal-import-log">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        导入 log
+                    </button>
+                    <button class="icon-button" id="modal-close">取消</button>
                 </div>
             </div>
-        </div>
     </div>
-    
+
     <script src="/static/js/main.js"></script>
 </body>
 </html>

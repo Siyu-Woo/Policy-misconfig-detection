@@ -3,7 +3,7 @@
 本目录提供多种辅助脚本，供策略解析/检测流水线调用。
 
 ## 1. CheckOutput.py
-- **功能**：统一的错误输出模块，通过 `PolicyCheckReporter` 按照固定格式输出 `fault policy rule / fault type / fault info / recommendation`。
+- **功能**：统一的错误输出模块，通过 `PolicyCheckReporter` 按照固定格式输出 `fault policy rule / fault type / fault info / recommendation`。统一的策略检查输出模块，调用 `PolicyCheckReporter` 可以把检测到的错误编号、策略名称、错误信息、整改建议打印到终端，用于 run_graph_pipeline.py 中的重复策略告警等场景。
 - **输入**：`report(error_code, policy_name=..., suggestion=..., target=...)` 等关键字参数；错误编码 1/2/3 分别表示重复策略（相同/不同规则）与重复规则，可在 `ERROR_TEMPLATES` 中扩展。
 - **输出**：根据模板打印到终端，用于 `run_graph_pipeline.py` 等脚本的策略检查结果。
 - **路径**：`Tools/CheckOutput.py`
@@ -15,7 +15,7 @@
   ```
 
 ## 2. SensiPermiSet.py
-- **功能**：维护敏感权限 CSV（`data/assistfile/sensitive_permissions.csv`），支持查看、添加、更新、删除记录。
+- **功能**：维护敏感权限 CSV（默认： `/root/policy-fileparser/data/assistfile/sensitive_permissions.csv`），支持查看、添加、更新、删除记录。
 - **输入**：命令行参数 `view/add/update/delete`，字段包含 `--policy-name`（必填）、`--role`、`--project-name`、`--system-scope` 等，角色/项目/作用域都允许 0 个或多个值。
 - **输出**：在终端提示操作结果，同时更新 CSV。
 - **路径**：`Tools/SensiPermiSet.py`
@@ -43,7 +43,7 @@
   ```
 
 ## 4. RoleGrantInfo.py
-- **功能**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv` 和 `rolegrant.csv`。
+- **功能**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv` 和 `rolegrant.csv`（均位于 `/root/policy-fileparser/data/assistfile`）。
 - **输入**：无命令行参数，直接运行依赖当前 OS_* 凭证调用 `openstack` CLI。
 - **输出**：CSV 文件写入 `data/assistfile` 目录；终端打印总记录数，权限不足时提示使用 admin 凭证。
 - **路径**：`Tools/RoleGrantInfo.py`
@@ -54,9 +54,9 @@
   ```
 
 ## 5. extract_keystone_rbac.py
-- **功能**：从 `keystone.log` 中提取 Keystone RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出 CSV。
+- **功能**：从keystone日志中提取 Keystone RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出 CSV。
 - **输入**：无命令行参数，读取 `/var/log/keystone/keystone.log`。
-- **输出**：`data/assistfile/rbac_audit_keystone.csv`，末尾附生成时间注释。
+- **输出**：`/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv`，末尾附生成时间注释。
 - **路径**：`Tools/extract_keystone_rbac.py`
 - **示例**：
   ```bash
@@ -70,7 +70,7 @@
   - `copy --src <file>`：将指定策略文件复制到 `/etc/keystone/keystone_policy.yaml`（默认 src 为 `/root/policy-fileparser/policy.yaml`）。
   - `add --name <policy> [--role <role>] [--project <project_id>]`：为策略新增条件，若已存在则 `(原规则) or (新条件)` 合并。
   - `delete --name <policy>`：删除指定策略条目。
-  - `export --dst <path>`：导出 `/etc/keystone/keystone_policy.yaml` 到指定路径（推荐 `/root/policy-fileparser/`）。
+  - `export --dst <path>`：导出 `/etc/keystone/keystone_policy.yaml` 到指定路径（推荐 `/etc/openstack/policies/keystone_policy_export.yaml`）。
   - `disable`：修改 `keystone.conf` 清空 `[oslo_policy] policy_file`，回退默认策略。
 - **输出**：终端提示操作结果，结束时提示重启 Keystone（Apache）。
 - **路径**：`Tools/Policyset.py`

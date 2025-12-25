@@ -1,244 +1,898 @@
-/* /root/Web/static/js/main.js - AutoScroll & Custom Parse Version */
-
-// 1. 图标定义 (保持不变)
-const ICONS = {
-    add: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>',
-    restart: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
-    loading: '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>',
-    code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>',
-    excel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>',
-    graph: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="12" r="3"></circle><line x1="6" y1="9" x2="6" y2="15"></line><line x1="8.5" y1="7.5" x2="15.5" y2="10.5"></line><line x1="8.5" y1="16.5" x2="15.5" y2="13.5"></line></svg>',
-    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>',
-    loadingSmall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>',
-    chevronUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>'
+const state = {
+    mode: 'run',
+    manageTab: 'files',
+    fileType: 'policy',
+    policyView: 'excel',
+    checkView: 'static',
+    container: { status: 'unknown' },
+    context: { user: 'admin', project: 'admin' },
+    files: { policy: [], log: [] },
+    current: { policy: null, log: null },
+    policyParse: {},
+    logParse: {},
+    checks: { static: {}, dynamic: {} },
+    envOptions: { ready: false, users: [], domains: [], projects: [] },
+    terminalHistory: [],
+    commandHistory: [],
+    historyIndex: 0,
+    graph: { network: null, nodes: null, edges: null, data: null, baseColors: {} },
+    focus: { type: null, value: null, line: null },
+    focusColor: null,
+    selectedErrorIdx: null,
 };
 
-// 2. 颜色映射配置
-const ERROR_PALETTE = [
-    { bg: 'bg-orange-50',  text: 'text-orange-600', border: 'border-orange-500', hex: '#f97316' },
-    { bg: 'bg-amber-50',   text: 'text-amber-600',  border: 'border-amber-500',  hex: '#d97706' },
-    { bg: 'bg-yellow-50',  text: 'text-yellow-600', border: 'border-yellow-500', hex: '#ca8a04' },
-    { bg: 'bg-red-50',     text: 'text-red-600',    border: 'border-red-500',    hex: '#dc2626' },
-    { bg: 'bg-rose-50',    text: 'text-rose-600',   border: 'border-rose-500',   hex: '#e11d48' },
-    { bg: 'bg-cyan-50',    text: 'text-cyan-600',   border: 'border-cyan-500',   hex: '#0891b2' },
-    { bg: 'bg-blue-50',    text: 'text-blue-600',   border: 'border-blue-500',   hex: '#2563eb' },
-    { bg: 'bg-violet-50',  text: 'text-violet-600', border: 'border-violet-500', hex: '#7c3aed' }
-];
+const els = {};
 
-document.addEventListener('alpine:init', () => {
-    Alpine.data('appData', () => ({
-        state: 'initial',
-        tab: 'code',
-        icons: ICONS,
-        excelData: [],
-        checking: false,
-        checkResult: null,
-        showCards: false,
-        focusedErrorIdx: null,
+const ERROR_COLORS = ['#f97316', '#ef4444', '#f59e0b', '#22c55e', '#38bdf8', '#8b5cf6', '#ec4899', '#94a3b8'];
 
-        getTheme(typeStr) {
-            let idx = 0;
-            const match = typeStr.match(/\d+/);
-            if (match) idx = parseInt(match[0]) - 1;
-            else idx = typeStr.length % 8;
-            if (idx < 0 || idx >= 8) idx = 0;
-            return ERROR_PALETTE[idx];
-        },
-        getRowClass(lineNum) {
-            if (!this.checkResult || !this.checkResult.errors) return '';
-            if (this.focusedErrorIdx !== null) {
-                const err = this.checkResult.errors[this.focusedErrorIdx];
-                if (err && err.lines.includes(lineNum)) {
-                    return 'error-row-highlight ' + this.getTheme(err.type).bg;
-                }
-                return 'opacity-30 grayscale'; 
-            }
-            const matchedError = this.checkResult.errors.find(err => err.lines.includes(lineNum));
-            if (matchedError) return 'error-row-highlight ' + this.getTheme(matchedError.type).bg;
-            return '';
-        },
-        getRowStyle(lineNum) {
-            let err = null;
-            if (this.focusedErrorIdx !== null) {
-                const focused = this.checkResult.errors[this.focusedErrorIdx];
-                if (focused && focused.lines.includes(lineNum)) err = focused;
-            } else {
-                err = this.checkResult?.errors?.find(e => e.lines.includes(lineNum));
-            }
-            return err ? 'color: ' + this.getTheme(err.type).hex : '';
-        },
-        
-        // >>> 核心修改：点击错误卡片，自动切换表格并滚动定位 <<<
-        toggleFocus(idx) {
-            // 如果点击的是当前已展开的，则折叠（idx设为null），否则设为新idx
-            this.focusedErrorIdx = (this.focusedErrorIdx === idx) ? null : idx;
-            
-            // 如果选中了某个错误
-            if (this.focusedErrorIdx !== null) {
-                // 1. 自动切到表格视图
-                this.tab = 'excel'; 
-                
-                // 2. 自动滚动定位逻辑
-                const err = this.checkResult.errors[this.focusedErrorIdx];
-                if (err && err.lines && err.lines.length > 0) {
-                    const targetLine = err.lines[0]; // 找到该错误的第一个行号
-                    
-                    // 等待 Tab 切换和 DOM 渲染完毕
-                    this.$nextTick(() => {
-                        // 在表格中寻找包含该行号的行
-                        // 这里使用原生 JS 查找所有 tr，判断第一列内容
-                        const rows = document.querySelectorAll('tbody tr');
-                        for (let row of rows) {
-                            const firstCell = row.querySelector('td');
-                            if (firstCell && parseInt(firstCell.textContent.trim()) === targetLine) {
-                                // 找到目标行，平滑滚动到视图中心 
-                                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                break;
-                            }
-                        }
-                    });
-                }
-            }
-        },
+function getErrorColor(typeStr) {
+    const match = (typeStr || '').match(/\d+/);
+    let idx = 0;
+    if (match) {
+        idx = parseInt(match[0], 10) - 1;
+    } else if (typeStr) {
+        idx = typeStr.length % ERROR_COLORS.length;
+    }
+    if (idx < 0 || idx >= ERROR_COLORS.length) idx = 0;
+    return ERROR_COLORS[idx];
+}
 
-        async handleUpload(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            this.state = 'processing';
-            const formData = new FormData();
-            formData.append('file', file);
-            try {
-                const res = await fetch('/upload', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.success) {
-                    await this.loadFileData();
-                    setTimeout(() => {
-                        this.state = 'result';
-                        this.$nextTick(() => { this.renderCode(); });
-                    }, 1000);
-                } else {
-                    alert('Parse Error: ' + data.error);
-                    this.state = 'initial';
-                }
-            } catch (err) {
-                console.error(err);
-                alert('Upload failed');
-                this.state = 'initial';
-            }
-        },
+function $(id) {
+    return document.getElementById(id);
+}
 
-        async loadFileData() {
-            try {
-                const res = await fetch('/get_file_content');
-                const data = await res.json();
-                
-                // 设置代码视图原始内容
-                const codeEl = document.getElementById('code-block');
-                if(codeEl) codeEl.textContent = data.raw_content;
-                
-                // >>> 核心修改：前端重写 Excel 解析逻辑 <<<
-                // 需求：按 "" 拆分，忽略 # 注释
-                if (data.raw_content) {
-                    const lines = data.raw_content.split('\n');
-                    const parsedData = [];
-                    
-                    lines.forEach((line, index) => {
-                        const cleanLine = line.trim();
-                        // 1. 忽略空行和以 # 开头的行
-                        if (!cleanLine || cleanLine.startsWith('#')) return;
-                        
-                        // 2. 使用正则提取双引号内的内容
-                        // 匹配 "content" 模式，非贪婪匹配
-                        const matches = cleanLine.match(/"(.*?)"/g);
-                        
-                        if (matches && matches.length >= 2) {
-                            // 去掉前后的引号
-                            const name = matches[0].slice(1, -1);
-                            const rule = matches[1].slice(1, -1);
-                            
-                            parsedData.push({
-                                line: index + 1, // 行号 (从1开始)
-                                name: name,
-                                rule: rule
-                            });
-                        }
-                    });
-                    this.excelData = parsedData;
-                } else {
-                    // 如果没有 raw_content，降级使用后端传回的 data
-                    this.excelData = data.excel_data;
-                }
+async function fetchJson(url, options = {}) {
+    const res = await fetch(url, options);
+    let data = null;
+    try {
+        data = await res.json();
+    } catch (err) {
+        data = null;
+    }
+    if (!res.ok) {
+        const message = data && data.error ? data.error : `HTTP ${res.status}`;
+        throw new Error(message);
+    }
+    return data;
+}
 
-            } catch (err) { console.error(err); }
-        },
+function showOverlay(text) {
+    els.overlayText.textContent = text;
+    els.overlay.classList.add('active');
+}
 
-        renderCode() {
-            const codeEl = document.getElementById('code-block');
-            if (codeEl && window.Prism) Prism.highlightElement(codeEl);
-        },
-        
-        async renderGraph() {
-            const container = document.getElementById('viz');
-            if (!container) return;
-            
-            container.innerHTML = '<div class=\"flex items-center justify-center h-full text-gray-500\">Loading Graph...</div>';
+function hideOverlay() {
+    els.overlay.classList.remove('active');
+}
 
-            try {
-                const res = await fetch('/get_graph_data');
-                const data = await res.json();
+function setMode(mode) {
+    state.mode = mode;
+    document.querySelectorAll('#mode-toggle button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    els.runView.classList.toggle('active', mode === 'run');
+    els.manageView.classList.toggle('active', mode === 'manage');
+    if (mode === 'manage') {
+        setManageTab(state.manageTab);
+    }
+    if (mode === 'run') {
+        loadContextOptions(false);
+    }
+}
 
-                if (data.error) throw new Error(data.error);
-                
-                const nodes = new vis.DataSet(data.nodes);
-                const edges = new vis.DataSet(data.edges);
-                
-                const options = {
-                    nodes: {
-                        shape: 'dot',
-                        size: 20,
-                        font: { size: 14 }
-                    },
-                    edges: {
-                        arrows: 'to',
-                        color: { color: '#ccc' }
-                    },
-                    physics: {
-                        stabilization: false,
-                        barnesHut: {
-                            gravitationalConstant: -3000,
-                            springLength: 95
-                        }
-                    }
-                };
+function setManageTab(tab) {
+    state.manageTab = tab;
+    document.querySelectorAll('#manage-tabs button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    document.querySelectorAll('.page').forEach((page) => {
+        page.classList.toggle('active', page.id === `page-${tab}`);
+    });
+    if (tab === 'policy') {
+        ensurePolicyParsed();
+    }
+    if (tab === 'log') {
+        ensureLogParsed();
+    }
+    if (tab === 'checks') {
+        renderChecks();
+    }
+    updateManageActions();
+}
 
-                container.innerHTML = '';
-                window.networkInstance = new vis.Network(container, { nodes, edges }, options);
-                
-            } catch (e) {
-                console.error('Graph Error:', e);
-                container.innerHTML = `<div class='text-red-500 p-4 text-center'>Graph Load Error: ${e.message}</div>`;
-            }
-        },
+function updateManageActions() {
+    els.openImportModal.style.display = state.manageTab === 'files' ? 'inline-flex' : 'none';
+    els.manageImportPolicyWrap.style.display = state.manageTab === 'policy' ? 'inline-flex' : 'none';
+    els.manageImportLogWrap.style.display = state.manageTab === 'log' ? 'inline-flex' : 'none';
+    const showChecks = state.manageTab === 'checks';
+    els.runStaticCheck.style.display = showChecks ? 'inline-flex' : 'none';
+    els.runDynamicCheck.style.display = showChecks ? 'inline-flex' : 'none';
+}
 
-        switchTab(newTab) {
-            this.tab = newTab;
-            if (newTab === 'graph') setTimeout(() => this.renderGraph(), 200);
-        },
-        async runCheck() {
-            this.checking = true;
-            this.showCards = false;
-            this.focusedErrorIdx = null;
-            try {
-                const res = await fetch('/run_check');
-                const data = await res.json();
-                this.checkResult = data;
-                if (data.summary && data.summary.total > 0) this.showCards = true;
-            } catch (err) {
-                console.error(err);
-                alert('Check failed');
-            } finally {
-                this.checking = false;
-            }
+function setFileType(type) {
+    state.fileType = type;
+    document.querySelectorAll('#file-type-tabs button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.type === type);
+    });
+    renderFileSelect();
+    loadFileContent();
+}
+
+function setPolicyView(view) {
+    state.policyView = view;
+    document.querySelectorAll('#policy-view-tabs button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+    });
+    els.policyTable.style.display = view === 'excel' ? 'block' : 'none';
+    els.graphPanel.style.display = view === 'graph' ? 'block' : 'none';
+    if (view === 'graph') {
+        loadGraph();
+    }
+}
+
+function setCheckView(view) {
+    state.checkView = view;
+    state.selectedErrorIdx = null;
+    state.focusColor = null;
+    document.querySelectorAll('#check-view-tabs button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.check === view);
+    });
+    renderChecks();
+}
+
+function updateStatus() {
+    const dot = els.statusDot;
+    const status = state.container.status || 'unknown';
+    const detail = state.container.error ? ` (${state.container.error})` : '';
+    dot.classList.remove('warn', 'danger');
+    if (status === 'running') {
+        els.statusText.textContent = `Docker: running${detail}`;
+    } else if (status === 'exited' || status === 'dead') {
+        dot.classList.add('danger');
+        els.statusText.textContent = `Docker: ${status}${detail}`;
+    } else {
+        dot.classList.add('warn');
+        els.statusText.textContent = `Docker: ${status}${detail}`;
+    }
+}
+
+function updateContext() {
+    if (els.contextHost) {
+        els.contextHost.textContent = state.container.status === 'running' ? 'Docker' : 'Host';
+    }
+    els.contextUser.textContent = state.context.user || 'admin';
+    els.contextDomain.textContent = state.context.domain || 'Default';
+    els.terminalPrompt.textContent = `${state.context.user || 'admin'}@docker:$`;
+}
+
+function appendTerminalLine(text, type = 'output') {
+    const line = document.createElement('div');
+    line.className = `terminal-line ${type}`;
+    line.textContent = text;
+    els.terminalOutput.appendChild(line);
+    els.terminalOutput.scrollTop = els.terminalOutput.scrollHeight;
+}
+
+async function sendTerminalCommand() {
+    const command = els.terminalInput.value.trim();
+    if (!command) return;
+    els.terminalInput.value = '';
+    state.commandHistory.push(command);
+    state.historyIndex = state.commandHistory.length;
+    appendTerminalLine(`$ ${command}`, 'command');
+
+    try {
+        const res = await fetchJson('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command }),
+        });
+        if (res.stdout) appendTerminalLine(res.stdout);
+        if (res.stderr) appendTerminalLine(res.stderr, 'error');
+    } catch (err) {
+        appendTerminalLine(`Error: ${err.message}`, 'error');
+    }
+}
+
+function handleHistoryNav(e) {
+    if (e.key === 'ArrowUp') {
+        if (state.historyIndex > 0) {
+            state.historyIndex -= 1;
+            els.terminalInput.value = state.commandHistory[state.historyIndex] || '';
         }
-    }));
-});
+        e.preventDefault();
+    }
+    if (e.key === 'ArrowDown') {
+        if (state.historyIndex < state.commandHistory.length - 1) {
+            state.historyIndex += 1;
+            els.terminalInput.value = state.commandHistory[state.historyIndex] || '';
+        } else {
+            state.historyIndex = state.commandHistory.length;
+            els.terminalInput.value = '';
+        }
+        e.preventDefault();
+    }
+}
+
+async function refreshState() {
+    const data = await fetchJson('/api/state');
+    state.container = data.container || {};
+    state.context = data.context || {};
+    state.files = data.files || { policy: [], log: [] };
+    state.current = data.current || { policy: null, log: null };
+    state.policyParse = data.policy_parse || {};
+    state.logParse = data.log_parse || {};
+    state.checks = data.checks || { static: {}, dynamic: {} };
+    state.envOptions = data.env_options || state.envOptions;
+    updateStatus();
+    updateContext();
+    if (state.envOptions.ready) {
+        renderContextOptions();
+    }
+    renderFileSelect();
+    if (state.manageTab === 'files') {
+        loadFileContent();
+    }
+}
+
+async function loadContextOptions(force) {
+    if (state.envOptions.ready && !force) {
+        renderContextOptions();
+        return;
+    }
+    try {
+        const data = await fetchJson(`/api/context/options?refresh=${force ? '1' : '0'}`);
+        state.envOptions = data;
+        renderContextOptions();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function renderContextOptions() {
+    const users = state.envOptions.users || [];
+    const domains = state.envOptions.domains || [];
+    els.userSelect.innerHTML = '';
+    els.domainSelect.innerHTML = '';
+
+    users.forEach((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        if (name === state.context.user) option.selected = true;
+        els.userSelect.appendChild(option);
+    });
+
+    domains.forEach((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        if (name === state.context.domain) option.selected = true;
+        els.domainSelect.appendChild(option);
+    });
+
+    if (!users.length) {
+        const option = document.createElement('option');
+        option.value = 'admin';
+        option.textContent = 'admin';
+        els.userSelect.appendChild(option);
+    }
+    if (!domains.length) {
+        const option = document.createElement('option');
+        option.value = 'Default';
+        option.textContent = 'Default';
+        els.domainSelect.appendChild(option);
+    }
+}
+
+async function handleContextChange() {
+    const selectedUser = els.userSelect.value;
+    const selectedDomain = els.domainSelect.value;
+    showOverlay('切换用户/域...');
+    try {
+        await loadContextOptions(true);
+        if (selectedUser) els.userSelect.value = selectedUser;
+        if (selectedDomain) els.domainSelect.value = selectedDomain;
+        const data = await fetchJson('/api/context', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: els.userSelect.value, domain: els.domainSelect.value }),
+        });
+        state.context = data;
+        updateContext();
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+function renderFileSelect() {
+    const select = els.fileSelect;
+    select.innerHTML = '';
+    const list = state.files[state.fileType] || [];
+    const current = state.current[state.fileType];
+    list.forEach((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        if (name === current) option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+async function loadFileContent() {
+    const filename = state.current[state.fileType];
+    if (!filename) {
+        els.fileCode.textContent = '当前无文件，请先导入。';
+        return;
+    }
+    try {
+        const data = await fetchJson(`/api/file/content?type=${state.fileType}&filename=${encodeURIComponent(filename)}`);
+        els.fileCode.textContent = data.content || '';
+        els.fileCode.className = state.fileType === 'policy' ? 'language-yaml' : 'language-log';
+        if (window.Prism) Prism.highlightElement(els.fileCode);
+    } catch (err) {
+        els.fileCode.textContent = '加载失败。';
+    }
+}
+
+async function ensurePolicyParsed() {
+    if (!state.current.policy) return;
+    if (state.policyParse.ready && state.policyParse.file === state.current.policy) {
+        renderPolicy();
+        return;
+    }
+    showOverlay('解析 policy...');
+    try {
+        const data = await fetchJson('/api/policy/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: false }),
+        });
+        state.policyParse = data;
+        renderPolicy();
+        loadGraph(true);
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+function renderPolicy() {
+    const excel = state.policyParse.excel || [];
+    let html = '<table><thead><tr><th>#</th><th>Policy</th><th>Rule</th></tr></thead><tbody>';
+    excel.forEach((row) => {
+        const focusValue = state.focus.value || '';
+        const byApi = state.focus.type === 'api' && focusValue && row.name.includes(focusValue);
+        const byRole = state.focus.type === 'role' && focusValue && row.rule.includes(focusValue);
+        const byProject = state.focus.type === 'project' && focusValue && row.rule.includes(focusValue);
+        const highlight = state.focus.line === row.line || byApi || byRole || byProject;
+        const colorStyle = highlight && state.focusColor ? `style="box-shadow: inset 3px 0 0 ${state.focusColor}; background: ${state.focusColor}22;"` : '';
+        html += `<tr class="${highlight ? 'highlight' : ''}" data-line="${row.line}" data-name="${row.name}" ${colorStyle}><td>${row.line}</td><td>${row.name}</td><td>${row.rule}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    els.policyTable.innerHTML = html;
+
+    els.policyTable.querySelectorAll('tr[data-line]').forEach((row) => {
+        row.addEventListener('click', () => {
+            const name = row.dataset.name;
+            const line = Number(row.dataset.line);
+            setFocus({ type: 'api', value: name, line });
+        });
+    });
+
+    renderPolicyStats();
+}
+
+function renderPolicyStats() {
+    const stats = state.policyParse.stats || {};
+    const items = [
+        { label: 'API 数量', value: stats.api || 0 },
+        { label: 'Rule 数量', value: stats.rule || 0 },
+        { label: 'Role 数量', value: stats.role || 0 },
+        { label: 'Project 数量', value: stats.project || 0 },
+        { label: 'User 数量', value: stats.user || 0 },
+    ];
+    els.policyStats.innerHTML = items
+        .map((item) => `<div class="stats-card"><b>${item.value}</b>${item.label}</div>`)
+        .join('');
+}
+
+async function loadGraph(force = false) {
+    if (state.graph.network && !force) return;
+    try {
+        const data = await fetchJson('/api/graph');
+        state.graph.data = data;
+        state.graph.nodes = new vis.DataSet(data.nodes || []);
+        state.graph.edges = new vis.DataSet(data.edges || []);
+        state.graph.baseColors = {};
+        (data.nodes || []).forEach((node) => {
+            state.graph.baseColors[node.id] = node.color || '#a3bffa';
+        });
+        const options = {
+            nodes: { shape: 'dot', size: 16, font: { size: 12 } },
+            edges: { arrows: 'to', color: { color: '#94a3b8' } },
+            physics: { stabilization: false, barnesHut: { gravitationalConstant: -2500, springLength: 90 } },
+        };
+        state.graph.network = new vis.Network(els.graph, { nodes: state.graph.nodes, edges: state.graph.edges }, options);
+        state.graph.network.on('click', (params) => {
+            if (!params.nodes.length) {
+                clearFocus();
+                return;
+            }
+            if (state.selectedErrorIdx !== null) {
+                return;
+            }
+            const nodeId = params.nodes[0];
+            const node = state.graph.nodes.get(nodeId);
+            if (!node) return;
+            setFocus({ type: 'api', value: node.label });
+            highlightGraph(nodeId);
+        });
+        applyGraphFocus();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function highlightGraph(focusId, colorOverride = null) {
+    if (!state.graph.network || !state.graph.nodes) return;
+    const connected = new Set(state.graph.network.getConnectedNodes(focusId));
+    connected.add(focusId);
+    const updates = state.graph.nodes.get().map((node) => {
+        const isFocus = connected.has(node.id);
+        return {
+            id: node.id,
+            color: isFocus ? (colorOverride || state.graph.baseColors[node.id]) : '#e2e8f0',
+            font: { color: isFocus ? '#0f172a' : '#cbd5f5' },
+        };
+    });
+    state.graph.nodes.update(updates);
+}
+
+function applyGraphFocus() {
+    if (!state.graph.nodes) return;
+    if (!state.focus.value) {
+        state.graph.nodes.update(
+            state.graph.nodes.get().map((node) => ({
+                id: node.id,
+                color: state.graph.baseColors[node.id] || node.color,
+                font: { color: '#0f172a' },
+            }))
+        );
+        return;
+    }
+    const focusValue = state.focus.value.toLowerCase();
+    const matched = state.graph.nodes.get().filter((node) => {
+        if (!node.label) return false;
+        if (state.focus.type === 'role') {
+            return node.labels && node.labels.includes('ConditionNode') && node.cond_type === 'role' && node.label.toLowerCase().includes(focusValue);
+        }
+        if (state.focus.type === 'project') {
+            return node.labels && node.labels.includes('ConditionNode') && ['project', 'project_id'].includes(node.cond_type) && node.label.toLowerCase().includes(focusValue);
+        }
+        return node.label.toLowerCase().includes(focusValue);
+    });
+    if (!matched.length) return;
+    const focusId = matched[0].id;
+    highlightGraph(focusId, state.focusColor);
+}
+
+function setFocus({ type, value, line = null, color = undefined }) {
+    if (state.selectedErrorIdx !== null && color === undefined) {
+        return;
+    }
+    state.focus = { type, value, line };
+    if (color !== undefined) {
+        state.focusColor = color;
+    } else if (state.selectedErrorIdx === null) {
+        state.focusColor = null;
+    }
+    if (type === 'api') {
+        els.searchApi.value = value || '';
+        els.searchRole.value = '';
+        els.searchProject.value = '';
+    }
+    if (type === 'role') {
+        els.searchApi.value = '';
+        els.searchRole.value = value || '';
+        els.searchProject.value = '';
+    }
+    if (type === 'project') {
+        els.searchApi.value = '';
+        els.searchRole.value = '';
+        els.searchProject.value = value || '';
+    }
+    renderPolicy();
+    applyGraphFocus();
+    if (line) {
+        const row = els.policyTable.querySelector(`tr[data-line='${line}']`);
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+function clearFocus() {
+    if (state.selectedErrorIdx !== null) return;
+    state.focus = { type: null, value: null, line: null };
+    els.searchApi.value = '';
+    els.searchRole.value = '';
+    els.searchProject.value = '';
+    renderPolicy();
+    applyGraphFocus();
+}
+
+async function ensureLogParsed() {
+    if (!state.current.log) return;
+    if (state.logParse.ready && state.logParse.file === state.current.log) {
+        renderLog();
+        return;
+    }
+    showOverlay('解析 log...');
+    try {
+        const data = await fetchJson('/api/log/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: false }),
+        });
+        state.logParse = data;
+        renderLog();
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+function renderLog() {
+    const rows = state.logParse.rows || [];
+    let html = '<table><thead><tr><th>Time</th><th>API</th><th>User</th><th>Project</th></tr></thead><tbody>';
+    rows.forEach((row) => {
+        html += `<tr><td>${row.timestamp || ''}</td><td>${row.api || ''}</td><td>${row.user_name || ''}</td><td>${row.project_name || ''}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    els.logTable.innerHTML = html;
+}
+
+function renderChecks() {
+    const current = state.checks[state.checkView] || {};
+    const errors = current.errors || [];
+    if (state.selectedErrorIdx !== null && state.selectedErrorIdx >= errors.length) {
+        state.selectedErrorIdx = null;
+        state.focusColor = null;
+    }
+    if (!errors.length) {
+        els.checkCards.innerHTML = '<div class="check-card">暂无检测结果</div>';
+    } else {
+        els.checkCards.innerHTML = errors
+            .map((err, idx) => {
+                const lines = (err.lines || []).join(', ');
+                const color = getErrorColor(err.type);
+                const selected = state.selectedErrorIdx === idx;
+                const dimmed = state.selectedErrorIdx !== null && !selected;
+                const classes = ['check-card', selected ? 'selected' : '', dimmed ? 'dimmed' : ''].join(' ');
+                return `<div class="${classes}" data-index="${idx}" style="--accent-color:${color}">
+                    <strong>${err.type || 'Unknown'}</strong>
+                    <div><small>${lines ? `Line ${lines}` : ''}</small></div>
+                    <div>${(err.policy || '').trim().replace(/\\n/g, ' ')}</div>
+                    <div><small>${err.info || ''}</small></div>
+                </div>`;
+            })
+            .join('');
+    }
+
+    els.checkCards.querySelectorAll('.check-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            const idx = Number(card.dataset.index);
+            const err = errors[idx];
+            if (!err) return;
+            const line = err.lines && err.lines.length ? err.lines[0] : null;
+            let apiName = '';
+            const match = (err.policy || '').match(/line\\s+\\d+\\s*:\\s*([^\\s]+)/);
+            if (match) apiName = match[1];
+            if (state.selectedErrorIdx === idx) {
+                state.selectedErrorIdx = null;
+                state.focusColor = null;
+                clearFocus();
+                renderChecks();
+                return;
+            }
+            state.selectedErrorIdx = idx;
+            state.focusColor = getErrorColor(err.type);
+            setFocus({ type: 'api', value: apiName, line, color: state.focusColor });
+            renderChecks();
+        });
+    });
+
+    const summary = current.summary || {};
+    const byType = summary.by_type || {};
+    els.checkSummary.innerHTML = Object.keys(byType)
+        .map((key) => `<span style="--accent-color:${getErrorColor(key)}; border-left:3px solid var(--accent-color)">${key}: ${byType[key]}</span>`)
+        .join('');
+}
+
+async function handleFileSelectChange() {
+    const filename = els.fileSelect.value;
+    await fetchJson('/api/files/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: state.fileType, filename }),
+    });
+    await refreshState();
+    loadFileContent();
+}
+
+async function handleImport(file, type, endpoint) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    showOverlay('上传中...');
+    try {
+        await fetchJson(endpoint, { method: 'POST', body: formData });
+        await refreshState();
+        if (type === 'policy') {
+            await ensurePolicyParsed();
+        }
+        if (type === 'log') {
+            await ensureLogParsed();
+        }
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+async function handleApplyPolicy(file) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    showOverlay('导入 policy 并重启容器...');
+    try {
+        await fetchJson('/api/apply/policy', { method: 'POST', body: formData });
+        await refreshState();
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+async function handleExport(url, message) {
+    showOverlay(message);
+    try {
+        await fetchJson(url, { method: 'POST' });
+        await refreshState();
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+async function handleEnvOverview() {
+    showOverlay('拉取环境信息...');
+    try {
+        const data = await fetchJson('/api/env/overview');
+        renderOverview(data);
+    } catch (err) {
+        console.error(err);
+    } finally {
+        hideOverlay();
+    }
+}
+
+function renderOverview(data) {
+    const users = data.users || [];
+    const projects = data.projects || [];
+    const domains = data.domains || [];
+    els.overviewPanel.innerHTML = `
+        <div class="inline-card"><h4>Users (${users.length})</h4>${users.slice(0, 6).map((u) => `<div>${u.Name || ''}</div>`).join('')}</div>
+        <div class="inline-card"><h4>Projects (${projects.length})</h4>${projects.slice(0, 6).map((p) => `<div>${p.Name || ''}</div>`).join('')}</div>
+        <div class="inline-card"><h4>Domains (${domains.length})</h4>${domains.slice(0, 6).map((d) => `<div>${d.Name || ''}</div>`).join('')}</div>
+    `;
+}
+
+function bindEvents() {
+    document.querySelectorAll('#mode-toggle button').forEach((btn) => {
+        btn.addEventListener('click', () => setMode(btn.dataset.mode));
+    });
+
+    document.querySelectorAll('#manage-tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => setManageTab(btn.dataset.tab));
+    });
+
+    document.querySelectorAll('#file-type-tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => setFileType(btn.dataset.type));
+    });
+
+    document.querySelectorAll('#policy-view-tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => setPolicyView(btn.dataset.view));
+    });
+
+    document.querySelectorAll('#check-view-tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => setCheckView(btn.dataset.check));
+    });
+
+    els.terminalSend.addEventListener('click', sendTerminalCommand);
+    els.terminalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendTerminalCommand();
+        handleHistoryNav(e);
+    });
+    els.terminalClear.addEventListener('click', () => {
+        els.terminalOutput.innerHTML = '';
+    });
+
+    els.fileSelect.addEventListener('change', handleFileSelectChange);
+
+    els.exportPolicy.addEventListener('click', () => handleExport('/api/export/policy', '导出 policy...'));
+    els.exportLog.addEventListener('click', () => handleExport('/api/export/log', '导出 log...'));
+    els.importPolicy.addEventListener('change', (e) => handleApplyPolicy(e.target.files[0]));
+    els.manageImportPolicy.addEventListener('change', (e) => handleImport(e.target.files[0], 'policy', '/api/import/policy'));
+    els.manageImportLog.addEventListener('change', (e) => handleImport(e.target.files[0], 'log', '/api/import/log'));
+    els.fetchOverview.addEventListener('click', handleEnvOverview);
+
+    els.runStaticCheck.addEventListener('click', async () => {
+        showOverlay('静态检测中...');
+        try {
+            const data = await fetchJson('/api/check/static', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: false }) });
+            state.checks.static = data;
+            state.selectedErrorIdx = null;
+            state.focusColor = null;
+            renderChecks();
+        } catch (err) {
+            console.error(err);
+            alert(err.message);
+        } finally {
+            hideOverlay();
+        }
+    });
+
+    els.runDynamicCheck.addEventListener('click', async () => {
+        showOverlay('动态检测中...');
+        try {
+            const data = await fetchJson('/api/check/dynamic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: false }) });
+            state.checks.dynamic = data;
+            state.selectedErrorIdx = null;
+            state.focusColor = null;
+            renderChecks();
+        } catch (err) {
+            console.error(err);
+            alert(err.message);
+        } finally {
+            hideOverlay();
+        }
+    });
+
+    els.userSelect.addEventListener('change', handleContextChange);
+    els.domainSelect.addEventListener('change', handleContextChange);
+    els.userSelect.addEventListener('click', () => loadContextOptions(true));
+    els.domainSelect.addEventListener('click', () => loadContextOptions(true));
+
+    els.containerRestart.addEventListener('click', async () => {
+        showOverlay('重启容器中...');
+        try {
+            await fetchJson('/api/container/restart', { method: 'POST' });
+            await refreshState();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            hideOverlay();
+        }
+    });
+
+    els.openImportModal.addEventListener('click', () => {
+        els.importModal.classList.add('active');
+    });
+    els.modalImportPolicy.addEventListener('click', () => {
+        els.importModal.classList.remove('active');
+        els.manageImportPolicy.click();
+    });
+    els.modalImportLog.addEventListener('click', () => {
+        els.importModal.classList.remove('active');
+        els.manageImportLog.click();
+    });
+    els.modalClose.addEventListener('click', () => {
+        els.importModal.classList.remove('active');
+    });
+    els.importModal.addEventListener('click', (e) => {
+        if (e.target === els.importModal) {
+            els.importModal.classList.remove('active');
+        }
+    });
+
+    els.searchApi.addEventListener('input', () => {
+        if (els.searchApi.value.trim()) setFocus({ type: 'api', value: els.searchApi.value.trim() });
+        else clearFocus();
+    });
+    els.searchRole.addEventListener('input', () => {
+        if (els.searchRole.value.trim()) setFocus({ type: 'role', value: els.searchRole.value.trim() });
+        else clearFocus();
+    });
+    els.searchProject.addEventListener('input', () => {
+        if (els.searchProject.value.trim()) setFocus({ type: 'project', value: els.searchProject.value.trim() });
+        else clearFocus();
+    });
+}
+
+function cacheEls() {
+    els.runView = $('run-view');
+    els.manageView = $('manage-view');
+    els.statusDot = $('status-dot');
+    els.statusText = $('status-text');
+    els.contextUser = $('context-user');
+    els.contextDomain = $('context-domain');
+    els.contextHost = $('context-host');
+    els.userSelect = $('user-select');
+    els.domainSelect = $('domain-select');
+    els.terminalPrompt = $('terminal-prompt');
+    els.terminalOutput = $('terminal-output');
+    els.terminalInput = $('terminal-input');
+    els.terminalSend = $('terminal-send');
+    els.terminalClear = $('terminal-clear');
+    els.fileSelect = $('file-select');
+    els.fileCode = $('file-code');
+    els.policyTable = $('policy-table');
+    els.graphPanel = $('graph-panel');
+    els.graph = $('graph');
+    els.policyStats = $('policy-stats');
+    els.logTable = $('log-table');
+    els.checkCards = $('check-cards');
+    els.checkSummary = $('check-summary');
+    els.searchApi = $('search-api');
+    els.searchRole = $('search-role');
+    els.searchProject = $('search-project');
+    els.exportPolicy = $('export-policy');
+    els.exportLog = $('export-log');
+    els.importPolicy = $('import-policy');
+    els.manageImportPolicy = $('manage-import-policy');
+    els.manageImportLog = $('manage-import-log');
+    els.manageImportPolicyWrap = $('manage-import-policy-wrap');
+    els.manageImportLogWrap = $('manage-import-log-wrap');
+    els.openImportModal = $('open-import-modal');
+    els.fetchOverview = $('fetch-overview');
+    els.runStaticCheck = $('run-static-check');
+    els.runDynamicCheck = $('run-dynamic-check');
+    els.overlay = $('overlay');
+    els.overlayText = $('overlay-text');
+    els.containerRestart = $('container-restart');
+    els.overviewPanel = $('overview-panel');
+    els.importModal = $('import-modal');
+    els.modalImportPolicy = $('modal-import-policy');
+    els.modalImportLog = $('modal-import-log');
+    els.modalClose = $('modal-close');
+}
+
+async function init() {
+    cacheEls();
+    bindEvents();
+    await refreshState();
+    await loadContextOptions(true);
+    if (state.container.status !== 'running') {
+        appendTerminalLine('容器未运行，请先启动 openstack-policy-detection。', 'error');
+        showOverlay('容器未运行，请先启动 openstack-policy-detection');
+        setTimeout(() => {
+            hideOverlay();
+        }, 3000);
+    }
+    setMode('run');
+    setManageTab('files');
+    setFileType('policy');
+    setPolicyView('excel');
+    setCheckView('static');
+    await loadFileContent();
+    setInterval(async () => {
+        try {
+            const status = await fetchJson('/api/status');
+            state.container = status.container || {};
+            state.context = status.context || state.context;
+            updateStatus();
+            updateContext();
+        } catch (err) {
+            console.error(err);
+        }
+    }, 15000);
+}
+
+window.addEventListener('DOMContentLoaded', init);

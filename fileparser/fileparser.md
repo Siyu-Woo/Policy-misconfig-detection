@@ -1,4 +1,7 @@
 # fileparser 模块说明
+## fileparser目录
+`/root/policy-fileparser` 目录提供了策略解析、API 抽取、策略与 API 匹配以及知识图谱生成的全部脚本，可配合Neo4j 环境直接运行。
+
 
 本文档概述 `fileparser` 目录中与图构建相关的六个脚本：`policypreprocess.py`、`policy_parser.py`、`openstackpolicygraph.py`、`openstackgraph.py`、`run_graph_pipeline.py` 与 `PolicyGen.py`，并整理它们的输入/输出、依赖关系、Neo4j 的数据结构以及策略文件路径。
 
@@ -23,6 +26,9 @@
 - **功能**：使用 Keystone Admin API 读取当前 OpenStack 环境的用户、角色、项目及角色分配，基于 `role_assignments` 合成 Token 层（支持共享 / 独享 token），并把 system scope 也拆成节点写入 Neo4j，形成“身份子图”。提供清理、生成测试数据等附加能力。
 - **输入**：OpenStack 管理员凭据（在文件顶部 `OS_CONFIG` 配置）和 Neo4j 连接信息。
 - **输出**：`User`、`Token`、`Role`、`SystemScope` 节点，以及 `HAS_TOKEN`、`GRANTS`、`HAS_SYSTEM_SCOPE` 关系；控制台还会输出 token-role-scope 映射及共享统计。
+- `openstackgraph.py`：通过 `keystoneauth1` / `python-keystoneclient` 读取当前环境中的用户、项目、角色等关系，并借助 `neo4j` 驱动把节点关系写入 Neo4j。脚本内的 `OS_CONFIG` 和 `NEO4J_*` 常量可按需要修改，还提供清理测试数据、生成示例数据和推送写入的完整流程。  
+- `openstackpolicygraph.py`：`PolicyGraphCreator` 根据策略字典（可直接来自 `policy_parser` 或前述 Excel）生成策略节点及条件节点，自动去重、归一化表达式并写入 Neo4j，可作为策略知识图谱的落地脚本。
+
 
 ### run_graph_pipeline.py
 - **功能**：统一入口脚本，串联 CLI 调用、身份子图构建与策略子图构建，并内置策略重复检测模块。

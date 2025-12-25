@@ -28,8 +28,8 @@ except ImportError:
     sys.exit(1)
 
 
-DEFAULT_SRC = "/root/policy-fileparser/policy.yaml"
-TARGET_POLICY = "/etc/keystone/keystone_policy.yaml"
+DEFAULT_SRC = "/root/policy-fileparser/policy.yaml" #默认文件
+TARGET_POLICY = "/etc/keystone/keystone_policy.yaml" #keystone实际读取的文件
 KEYSTONE_CONF = "/etc/keystone/keystone.conf"
 
 

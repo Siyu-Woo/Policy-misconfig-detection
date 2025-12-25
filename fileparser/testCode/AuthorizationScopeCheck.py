@@ -18,7 +18,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from Tools.CheckOutput import PolicyCheckReporter
 
 DEFAULT_AUDIT_FILE = "/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv"
 DEFAULT_TEMP_FILE = "/root/policy-fileparser/data/assistfile/rbac_audit_keystone_temp.csv"
@@ -30,10 +29,16 @@ FALLBACK_ROLEGRANT_FILE = "/root/policy-fileparser/data/assistfile/rolegrant.csv
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="授权范围检查（基于 RBAC 审计日志）")
     parser.add_argument(
-        "--audit-file",
-        action="append",
+        "--policy",
+        nargs="+",
+        default=[],
+        help="策略文件或目录路径（保持与 run_graph_pipeline 用法一致）",
+    )
+    parser.add_argument(
+        "--parsed-logs",
+        nargs="+",
         default=[DEFAULT_AUDIT_FILE],
-        help="审计 CSV 文件路径，可重复传入多个",
+        help="解析后的 RBAC CSV 路径",
     )
     parser.add_argument(
         "--rolegrant-file",
@@ -53,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--neo4j-uri", default="bolt://localhost:7687")
     parser.add_argument("--neo4j-user", default="neo4j")
     parser.add_argument("--neo4j-password", default="Password")
+    parser.add_argument("--output", default="console", choices=["console"])
     return parser.parse_args()
 
 
@@ -200,41 +206,48 @@ def summarize(rows: List[Dict[str, str]]) -> Counter:
     return counter
 
 
-def print_summary(counter: Counter, project_map: Dict[str, str]) -> None:
-    for (api, user, role, project), count in counter.items():
-        project_label = project_map.get(project, project)
-        print(f"{api} | {user} | {role} | {project_label} | {count}")
-
-
 def format_policy_rule(name: str, lines) -> str:
     if not lines:
         return name
     if isinstance(lines, list):
-        return "\n".join(f"line {line}: {name}" for line in lines)
-    return f"line {lines}: {name}"
+        joined = ",".join(str(line) for line in lines)
+        return f"【{joined}】 {name}"
+    return f"【{lines}】 {name}"
 
 
-def combine_rule_expressions(expressions: List[str]) -> str:
-    cleaned = [expr.strip() for expr in expressions if expr and expr.strip()]
-    if not cleaned:
-        return "(rule expression missing)"
-    if len(cleaned) == 1:
-        return cleaned[0]
-    return " OR ".join(cleaned)
+def _normalize_rule_roles(roles: List[str]) -> List[str]:
+    cleaned = [r.strip() for r in roles if r and r.strip()]
+    return cleaned
 
 
-def _replace_project_ids(text: str, project_map: Dict[str, str]) -> str:
-    if not text:
-        return text
-    for project_id, project_name in project_map.items():
-        if project_id in text:
-            text = text.replace(project_id, project_name)
-    return text
+def _normalize_rule_projects(projects: List[str]) -> List[str]:
+    cleaned = [p.strip() for p in projects if p and p.strip()]
+    return cleaned
 
 
-def check_unused_rules(
-    driver, summary: Counter, reporter: PolicyCheckReporter, project_map: Dict[str, str]
-) -> int:
+def _has_project_wildcard(projects: List[str]) -> bool:
+    for proj in projects:
+        if proj == "*" or "%(" in proj:
+            return True
+    return False
+
+
+def _has_role_wildcard(roles: List[str]) -> bool:
+    return any(r == "*" for r in roles)
+
+
+def _unique_preserve(items: List[str]) -> List[str]:
+    seen = set()
+    output = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        output.append(item)
+    return output
+
+
+def check_unused_rules(driver, summary: Counter, project_map: Dict[str, str]) -> int:
     total = 0
     policy_map: Dict[Tuple[str, str], set] = defaultdict(set)
 
@@ -246,10 +259,11 @@ def check_unused_rules(
 
     with driver.session() as session:
         for (policy_type, policy_name), pairs in policy_map.items():
+            policy_display = f"{policy_type}:{policy_name}"
             all_rules = session.run(
                 """
                 MATCH (p:PolicyNode {type: $type, name: $name})-[:HAS_RULE]->(r:RuleNode)
-                RETURN DISTINCT r.id AS id, r.expression AS expr, p.policyline AS lines, p.name AS pname
+                RETURN DISTINCT r.id AS id, r.expression AS expr, p.policyline AS lines
                 """,
                 type=policy_type,
                 name=policy_name,
@@ -281,68 +295,92 @@ def check_unused_rules(
             for record in all_rules_list:
                 if record["id"] in matched_ids:
                     continue
-                policy_display = f"{policy_type}:{policy_name}"
-                rule_expr = (record["expr"] or "").strip() or "(rule expression missing)"
-                rule_expr = _replace_project_ids(rule_expr, project_map)
-                reporter.report(
-                    "10",
-                    policy_name=format_policy_rule(policy_display, record["lines"]),
-                    api=policy_display,
-                    rule=rule_expr,
+                # 获取该规则的角色/项目条件
+                rule_detail = session.run(
+                    """
+                    MATCH (r:RuleNode {id: $rid})
+                    OPTIONAL MATCH (r)-[rel_role]->(role:ConditionNode {type: 'role'})
+                    WHERE type(rel_role) STARTS WITH 'REQUIRES_ROLE'
+                    OPTIONAL MATCH (r)-[rel_proj]->(proj:ConditionNode {type: 'project'})
+                    WHERE type(rel_proj) STARTS WITH 'REQUIRES_PROJECT'
+                    RETURN collect(DISTINCT role.name) AS roles,
+                           collect(DISTINCT proj.name) AS projects
+                    """,
+                    rid=record["id"],
+                ).single()
+                roles = _normalize_rule_roles(rule_detail["roles"] if rule_detail else [])
+                projects = _normalize_rule_projects(rule_detail["projects"] if rule_detail else [])
+
+                if not roles or not projects:
+                    # 当前检查只针对同时具备 role + project 的规则
+                    continue
+
+                role_any = _has_role_wildcard(roles)
+                project_any = _has_project_wildcard(projects)
+
+                filtered_roles = [r for r in roles if r.lower() != "admin"]
+                if not filtered_roles and not role_any:
+                    continue
+
+                used_pairs = {
+                    (role, proj)
+                    for (api, _user, role, proj), _count in summary.items()
+                    if api == policy_display and role and proj and role.lower() != "admin"
+                }
+
+                matched = False
+                for role, proj in used_pairs:
+                    role_ok = role_any or role in filtered_roles
+                    proj_ok = project_any or proj in projects
+                    if role_ok and proj_ok:
+                        matched = True
+                        break
+                if matched:
+                    continue
+
+                project_labels = []
+                for proj in projects:
+                    if proj == "*" or "%(" in proj:
+                        project_labels.append("any")
+                    else:
+                        project_labels.append(project_map.get(proj, proj))
+                project_labels = _unique_preserve(project_labels)
+                role_labels = _unique_preserve(filtered_roles) if filtered_roles else ["any"]
+
+                policy_lines = record["lines"]
+                print(
+                    f"Risk policy rule：{format_policy_rule(policy_display, policy_lines)}"
                 )
+                print(
+                    "Risk Info："
+                    f"{policy_display} is not being used by the assigned {','.join(role_labels)}/ in the assigned {','.join(project_labels)}"
+                )
+                print("")
                 total += 1
 
-    return total
-
-
-def check_untracked_policies(driver, summary: Counter, reporter: PolicyCheckReporter) -> int:
-    total = 0
-    policy_keys = set()
-    for (api, _user, _role, _project), _count in summary.items():
-        policy_type, policy_name = parse_policy_key(api)
-        if policy_type and policy_name:
-            policy_keys.add((policy_type, policy_name))
-
-    with driver.session() as session:
-        result = session.run(
-            """
-            MATCH (p:PolicyNode)-[:HAS_RULE]->(r:RuleNode)
-            RETURN p.type AS type, p.name AS name, p.policyline AS lines,
-                   collect(DISTINCT r.expression) AS exprs
-            """
-        )
-        for record in result:
-            key = (record["type"], record["name"])
-            if key in policy_keys:
-                continue
-            policy_display = f"{record['type']}:{record['name']}"
-            rule_expr = combine_rule_expressions(record["exprs"] or [])
-            reporter.report(
-                "11",
-                policy_name=format_policy_rule(policy_display, record["lines"]),
-                api=policy_display,
-                policy=f"{policy_display}: {rule_expr}",
-            )
-            total += 1
     return total
 
 
 def main() -> None:
     args = parse_args()
     user_map, role_map = load_rolegrant(args.rolegrant_file)
-    audit_rows = load_audit_rows(args.audit_file)
+    project_map = load_project_map(args.projectinfo_file)
+    audit_rows = load_audit_rows(args.parsed_logs)
     temp_rows = build_temp_rows(audit_rows, user_map, role_map)
     write_temp_file(args.temp_out, temp_rows)
 
     summary = summarize(temp_rows)
-    project_map = load_project_map(args.projectinfo_file)
-    print_summary(summary, project_map)
 
     driver = connect(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
     if not driver:
         return
-    reporter = PolicyCheckReporter()
-    check_unused_rules(driver, summary, reporter, project_map)
+    total = check_unused_rules(driver, summary, project_map)
+    if total == 0:
+        with driver.session() as session:
+            rule_count = session.run(
+                "MATCH (r:RuleNode) RETURN count(r) as c"
+            ).single()["c"]
+        print(f"read {rule_count} policy rules，all has proper authorization scope")
 
 
 if __name__ == "__main__":
