@@ -1,12 +1,12 @@
 # 用户信息
-更新时间：2025-12-23 11:00:02
+更新时间：2025-12-25 11:11:29
 - 6a4367ff14a349e69d7730a6229c46b0 (id=admin)
 - cabfa0644cd8479389a17af69bea501a (id=newuser)
 - f9a617d0b73f471ca54e71c91ca6876b (id=member)
 - 53711b1cdc0b4ccfbbd46e0bd3caffdd (id=manager)
 
 # 角色信息
-更新时间：2025-12-23 11:00:02
+更新时间：2025-12-25 11:11:29
 - 073c72cb8ae5460a8724fd635f5f8c44 (id=admin)
 - 387599c502094ff1a7a7e35e63bcb617 (id=test2)
 - c818d20779d94aaf875ec08f7c9af918 (id=reader)
@@ -14,7 +14,7 @@
 - faf75e30257d4c6fb7705dcd706888fc (id=member)
 
 # 项目信息
-更新时间：2025-12-23 11:00:02
+更新时间：2025-12-25 11:11:29
 - 938f3a5516bd40a68c730191901007e6 (id=admin)
 - c451de2c774640e3a2a6841cc5cc4b6d (id=demo-project)
 

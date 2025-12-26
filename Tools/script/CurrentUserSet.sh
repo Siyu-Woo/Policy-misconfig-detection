@@ -9,6 +9,27 @@ print_err() {
   printf "ERROR: %s\n" "$1"
 }
 
+ENVINFO_DIR="/root/policy-fileparser/data/assistfile/EnvInfo"
+USERINFO_CSV="${ENVINFO_DIR}/userinfo.csv"
+PROJECTINFO_CSV="${ENVINFO_DIR}/projectinfo.csv"
+
+check_envinfo() {
+  local missing=()
+  if [ ! -f "$USERINFO_CSV" ]; then
+    missing+=("userinfo.csv")
+  fi
+  if [ ! -f "$PROJECTINFO_CSV" ]; then
+    missing+=("projectinfo.csv")
+  fi
+  if [ ${#missing[@]} -ne 0 ]; then
+    print_err "Missing ${missing[*]} under ${ENVINFO_DIR}, cannot switch"
+    return 1
+  fi
+  return 0
+}
+
+check_envinfo
+
 usage() {
   cat <<'USAGE'
 Usage:

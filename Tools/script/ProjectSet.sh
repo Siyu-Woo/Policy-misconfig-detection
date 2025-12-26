@@ -145,12 +145,14 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-# 1) Load admin credentials
-if ! source /opt/openstack/envinfo/admin-openrc.sh >/dev/null 2>&1; then
-  print_err "Failed to source /opt/openstack/envinfo/admin-openrc.sh"
+# 1) Check current OS_* env
+echo "[INFO] Current OS_* env:"
+env | grep '^OS_' || true
+if [ "${OS_USERNAME:-}" != "admin" ]; then
+  print_err "权限不足，需要切换admin"
   exit 1
 fi
-print_ok "Admin credentials loaded"
+print_ok "Admin credentials confirmed"
 
 # 2) Parse args
 PROJECTS=()
@@ -215,7 +217,7 @@ create_project() {
 
   if info=$(show_project_info "$project"); then
     print_exist "$info"
-    return 0
+    return 2
   fi
 
   create_output=$(openstack project create --domain "$domain" "$project" 2>&1)
@@ -227,8 +229,10 @@ create_project() {
 
   if info=$(show_project_info "$project"); then
     print_create "$info"
+    return 0
   else
     print_err "Project created but failed to fetch info: $project"
+    return 1
   fi
 }
 
@@ -253,17 +257,33 @@ delete_project() {
   fi
 
   print_delete "$info"
+  return 0
 }
 
+DID_MUTATE="no"
 for project in "${PROJECTS[@]}"; do
   echo "---- $project ----"
   if [ "$MODE" = "delete" ]; then
-    delete_project "$project"
+    if delete_project "$project"; then
+      DID_MUTATE="yes"
+    fi
   else
     create_project "$project"
+    if [ $? -eq 0 ]; then
+      DID_MUTATE="yes"
+    fi
   fi
   echo ""
 done
 
 update_adminset
 print_ok "AdminSet.md updated"
+
+if [ "$DID_MUTATE" = "yes" ]; then
+  if python /root/Tools/RoleGrantInfo.py >/dev/null 2>&1; then
+    print_ok "Env info updated"
+  else
+    print_err "Failed to run /root/Tools/RoleGrantInfo.py"
+    python /root/Tools/RoleGrantInfo.py
+  fi
+fi

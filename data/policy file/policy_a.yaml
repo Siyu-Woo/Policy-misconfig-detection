@@ -1,3 +1,0 @@
-"identity:list_users": "role:admin and system_scope:all"
-"identity:get_project": "(role:admin or role:reader) and project_id:%(project_id)s"
-"compute:start_server": "role:member and project_id:%(project_id)s"

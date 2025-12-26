@@ -1,0 +1,22 @@
+"admin_required": "role:admin"
+"admin_or_member ": "role:admin or project_id:%(project_id)s"
+"service_role": "role:service"
+"service_or_admin": "rule:admin_required or rule:service_role"
+"owner": "user_id:%(user_id)s"
+"admin_or_owner": "rule:admin_required or rule:owner"
+"token_subject": "user_id:%(target.token.user_id)s"
+"admin_or_token_subject": "rule:admin_required or rule:token_subject"
+"service_admin_or_token_subject": "rule:service_or_admin or rule:token_subject"
+"identity:get_auth_catalog": "" # 错误码5，设置空rule
+"identity:get_auth_system": ""
+# "identity:get_consumer": "role:reader and system_scope:all"
+"identity:get_consumer": "role:* and system_scope:all" # 错误码4，通配符
+"identity:create_domain_config": "(role:admin or role:reader) and system_scope:all" # 错误码8 敏感权限错配给普通用户
+# "identity:create_domain_config": "role:admin and system_scope:all"
+"identity:get_project": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.project.domain_id)s)" # 错误码7:未设置project_id
+# "identity:get_project": "((role:reader and system_scope:all) or (role:reader and domain_id:%(target.project.domain_id)s)) and project_id:%(target.project.id)s"
+"identity:list_projects": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.domain_id)s)"
+"identity:list_user_projects": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.user.domain_id)s) or user_id:%(target.user.id)s"
+"identity:create_project": "(role:admin and system_scope:all) or (role:admin and domain_id:%(target.project.domain_id)s)"
+"identity:update_project": "(role:admin and system_scope:all) or (role:admin and domain_id:%(target.project.domain_id)s)"
+"identity:delete_project": "(role:admin and system_scope:all) or (role:admin and domain_id:%(target.project.domain_id)s)"

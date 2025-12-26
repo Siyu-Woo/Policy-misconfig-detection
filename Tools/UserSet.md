@@ -1,5 +1,9 @@
 # 用户与环境变量设置说明
 
+## 0. 权限检查
+- 运行前先执行 `env | grep ^OS_` 查看当前用户。
+- 若当前用户不是 admin，则提示“权限不足，需要切换admin”，无需继续执行后续新建/删除/罗列操作。
+
 ## 1. 环境变量示例
 - admin（密码为 `admin`，默认域 Default，Keystone 地址 http://127.0.0.1:5000/v3）  
   ```bash
@@ -113,6 +117,7 @@
 - 运行建图、授权信息获取函数：
   ```bash
   neo4j start
+  source /opt/openstack/envinfo/admin-openrc.sh # RoleGrantInfo 需要 admin 凭证
   python /root/Tools/RoleGrantInfo.py
   cd /root/policy-fileparser
   python run_graph_pipeline.py --policy-file "/etc/openstack/policies/policyDynamic_graphparser.yaml"

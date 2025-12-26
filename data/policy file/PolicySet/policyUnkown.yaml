@@ -1,0 +1,35 @@
+# Keystone policy sample for admin/demo-project reader
+#
+# 请将下面的 ADMIN_PROJECT_ID / DEMO_PROJECT_ID 替换为实际的项目 ID。
+#
+# admin 在所有项目拥有权限；reader 在 demo-project 拥有所有 list 命令和 1 个设置命令，
+# reader 在 admin 项目拥有所有 list 命令。
+
+# 1 openstack project list
+# 10 openstack project list --long
+"identity:list_projects": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 2 openstack user list
+# 11 openstack user list --long
+"identity:list_users": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 3:openstack role list
+"identity:list_roles": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 4. openstack service list
+"identity:list_services": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 5. openstack domain list  # test NO reader
+"identity:list_domains": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 设置类命令（仅示例）
+# 6. openstack user set --email newmail@example.com --description "adminset2 member" member  # test NO reader
+# 8. openstack user set --email newmail@example.com --description "redearset2 member" member  # test NO reader
+"identity:update_user": "role:admin or (role:reader and project_id:c451de2c774640e3a2a6841cc5cc4b6d)"
+
+# 7. openstack project set --description "adminset proj" demo-project
+# 9. openstack project set --description "readerset proj" demo-project
+"identity:update_project": "role:admin"
+
+# 说明：reader 在 demo-project 拥有所有 list 命令 + user 设置；reader 在 admin 项目仅有 list 命令；
+# admin 在所有项目拥有上述 list 和设置命令的权限。

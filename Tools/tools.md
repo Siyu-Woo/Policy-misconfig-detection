@@ -43,25 +43,26 @@
   ```
 
 ## 4. RoleGrantInfo.py
-- **功能**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv` 和 `rolegrant.csv`（均位于 `/root/policy-fileparser/data/assistfile`）。
+- **功能**：收集用户/项目/角色及授权关系，生成 `userinfo.csv`、`projectinfo.csv`、`roleinfo.csv` 和 `rolegrant.csv`（均位于 `/root/policy-fileparser/data/assistfile/envinfo`）。并且能够检查当前用户是否都有对应的openrc.sh文件
 - **输入**：无命令行参数，直接运行依赖当前 OS_* 凭证调用 `openstack` CLI。
-- **输出**：CSV 文件写入 `data/assistfile` 目录；终端打印总记录数，权限不足时提示使用 admin 凭证。
+- **输出**：CSV 文件写入 `data/assistfile/envinfo` 目录；终端打印总记录数，权限不足时提示使用 admin 凭证。
 - **路径**：`Tools/RoleGrantInfo.py`
 - **示例**：
   ```bash
   python /root/Tools/RoleGrantInfo.py
-  # 生成的文件：userinfo.csv、projectinfo.csv、roleinfo.csv、rolegrant.csv（均位于 data/assistfile）
+  # 生成的文件：userinfo.csv、projectinfo.csv、roleinfo.csv、rolegrant.csv（均位于 data/assistfile/EnvInfo）
   ```
 
 ## 5. extract_keystone_rbac.py
-- **功能**：从keystone日志中提取 Keystone RBAC 授权记录（时间、API、用户/项目、system_scope、domain、授权结果），输出 CSV。
-- **输入**：无命令行参数，读取 `/var/log/keystone/keystone.log`。
-- **输出**：`/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv`，末尾附生成时间注释。
+- **功能**：从 keystone 日志中提取 RBAC 授权记录，输出 CSV（时间、API、project_name、user_name、用户/项目 ID、system_scope、domain、授权结果）。
+- **输入**：默认读取 `/var/log/keystone/keystone.log`，可用 `--log` 指定。
+- **输出**：默认写入 `/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv`，可用 `--output` 指定；末尾附生成时间注释。
+- **依赖**：`/root/policy-fileparser/data/assistfile/EnvInfo/userinfo.csv`、`projectinfo.csv`（用于 ID→name 映射，未命中填充 UKUser{n}/UKProj{n}）。
 - **路径**：`Tools/extract_keystone_rbac.py`
 - **示例**：
   ```bash
   python /root/Tools/extract_keystone_rbac.py
-  # 结果文件：data/assistfile/rbac_audit_keystone.csv
+  python /root/Tools/extract_keystone_rbac.py --log /var/log/keystone/keystoneCollect.log --output /root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv
   ```
 
 ## 6. Policyset.py
@@ -77,7 +78,8 @@
 - **示例**：
   ```bash
   # 复制策略文件
-  python /root/Tools/Policyset.py copy --src /root/policy-fileparser/policy.yaml
+  python /root/Tools/Policyset.py copy --src /root/policy-fileparser/policy.yaml # 默认文件夹下文件
+  python /root/Tools/Policyset.py copy --src /etc/openstack/policies/TestPolicyFiles/policyB.yaml # 指定测试文件夹下文件
 
   # 为策略添加条件
   python /root/Tools/Policyset.py add --name identity:list_projects --role reader --project "%(project_id)s" # 注意有括号在输入命令行时候需要加引号

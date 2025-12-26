@@ -1,0 +1,9 @@
+api,project_name,high_authorized_num,high_authorized_percent,low_authorized_num,low_authorized_percent
+identity:get_consumer,default,0,0.00,0,0.00
+identity:delete_project,default,0,0.00,0,0.00
+identity:update_project,default,0,0.00,0,0.00
+identity:create_project,default,0,0.00,0,0.00
+identity:create_domain_config,default,0,0.00,0,0.00
+identity:list_user_projects,default,0,0.00,0,0.00
+identity:list_projects,default,0,0.00,0,0.00
+identity:get_project,default,0,0.00,0,0.00

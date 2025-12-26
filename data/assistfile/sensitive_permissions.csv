@@ -1,4 +1,5 @@
 id,policy_name,role,project_name,system_scope
 1,identity:authorize_request_token,,,all
 2,identity:get_project,,%(project_id)s,
-# 3,identity:create_domain_config,admin,,
+3,identity:create_domain_config,admin,,
+# 用于静态已知错误配置测试3

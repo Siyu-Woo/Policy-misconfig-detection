@@ -4,12 +4,12 @@
 收集 Keystone 中 user/project/role 及授权关系，输出至 CSV。
 
 生成文件（容器内路径）：
-  - /root/policy-fileparser/data/assistfile/userinfo.csv   (user_id,user_name)
-  - /root/policy-fileparser/data/assistfile/projectinfo.csv (project_id,project_name)
-  - /root/policy-fileparser/data/assistfile/roleinfo.csv   (role_id,role_name)
-  - /root/policy-fileparser/data/assistfile/rolegrant.csv  (user_id,user_name,project_id,project_name,role_id,role_name)
+  - /root/policy-fileparser/data/assistfile/EnvInfo/userinfo.csv   (user_id,user_name)
+  - /root/policy-fileparser/data/assistfile/EnvInfo/projectinfo.csv (project_id,project_name)
+  - /root/policy-fileparser/data/assistfile/EnvInfo/roleinfo.csv   (role_id,role_name)
+  - /root/policy-fileparser/data/assistfile/EnvInfo/rolegrant.csv  (user_id,user_name,project_id,project_name,role_id,role_name)
 
-权限不足时会打印错误并建议使用 admin 凭证。
+需要使用 admin 凭证执行，否则会提示权限不足。
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
-ASSIST_DIR = "/root/policy-fileparser/data/assistfile"
+ASSIST_DIR = "/root/policy-fileparser/data/assistfile/EnvInfo"
+ENVINFO_DIR = "/root/policy-fileparser/data/assistfile/EnvInfo"
 USER_CSV = os.path.join(ASSIST_DIR, "userinfo.csv")
 PROJECT_CSV = os.path.join(ASSIST_DIR, "projectinfo.csv")
 ROLE_CSV = os.path.join(ASSIST_DIR, "roleinfo.csv")
@@ -50,6 +51,20 @@ def write_csv(path: str, rows: List[Tuple[str, ...]], header: Tuple[str, ...]) -
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerows(rows)
+
+
+def get_current_os_env() -> Dict[str, str]:
+    try:
+        out = subprocess.check_output(["bash", "-lc", "env | grep ^OS_"], text=True)
+    except subprocess.CalledProcessError:
+        return {}
+    current = {}
+    for line in out.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        current[key.strip()] = value.strip()
+    return current
 
 
 def collect_users() -> Dict[str, str]:
@@ -118,7 +133,35 @@ def collect_assignments(users: Dict[str, str], projects: Dict[str, str], roles: 
     return rows
 
 
+def check_openrc_files(users: Dict[str, str]) -> None:
+    for user_id, user_name in users.items():
+        if user_name == "admin":
+            continue
+        openrc_name = f"{user_name}-openrc.sh"
+        openrc_path = os.path.join(ENVINFO_DIR, openrc_name)
+        if not os.path.exists(openrc_path):
+            print(f"{user_name} lost {openrc_name} file, recommend delete the {user_name}.")
+
+
 def main() -> None:
+    print("当前环境变量:")
+    try:
+        env_out = subprocess.check_output(["bash", "-lc", "env | grep ^OS_"], text=True)
+        if env_out.strip():
+            print(env_out.strip())
+    except subprocess.CalledProcessError:
+        pass
+
+    current = get_current_os_env()
+    current_user = current.get("OS_USERNAME", "")
+    current_project = current.get("OS_PROJECT_NAME", "")
+    if not current_user or current_user != "admin":
+        print("权限不足，需要切换admin")
+        if current_user:
+            print(f"当前用户: {current_user}")
+            print(f"当前项目: {current_project}")
+        sys.exit(1)
+
     users = collect_users()
     projects = collect_projects()
     roles = collect_roles()
@@ -136,6 +179,8 @@ def main() -> None:
         ("user_id", "user_name", "project_id", "project_name", "role_id", "role_name"),
     )
     print(f"已生成 {len(assignments)} 条授权记录 -> {ROLEGRANT_CSV}")
+
+    check_openrc_files(users)
 
 
 if __name__ == "__main__":

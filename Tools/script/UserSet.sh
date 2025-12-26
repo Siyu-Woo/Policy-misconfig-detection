@@ -17,6 +17,8 @@ print_err() {
   printf "ERROR: %s\n" "$1"
 }
 
+ENVINFO_DIR="/root/policy-fileparser/data/assistfile/EnvInfo"
+
 update_adminset() {
   local adminset="/root/Tools/AdminSet.md"
   local ts user_info role_info project_info
@@ -128,8 +130,8 @@ EOF
 usage() {
   cat <<'USAGE'
 Usage:
-  /root/Tools/script/UserSet.sh [--newuser] [--manager] [--member]
-  /root/Tools/script/UserSet.sh --delete [--newuser] [--manager] [--member]
+  /root/Tools/script/UserSet.sh [--newuser] [--manager] [--member] [--user <name>] [--password <pwd>]
+  /root/Tools/script/UserSet.sh --delete [--newuser] [--manager] [--member] [--user <name>]
   /root/Tools/script/UserSet.sh --list
 
 If no user flags are provided, all three users will be handled.
@@ -141,30 +143,49 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-# 1) Load admin credentials
-if ! source /opt/openstack/envinfo/admin-openrc.sh >/dev/null 2>&1; then
-  print_err "Failed to source /opt/openstack/envinfo/admin-openrc.sh"
+# 1) Check current OS_* env
+echo "[INFO] Current OS_* env:"
+env | grep '^OS_' || true
+if [ "${OS_USERNAME:-}" != "admin" ]; then
+  print_err "权限不足，需要切换admin"
   exit 1
 fi
-print_ok "Admin credentials loaded"
+print_ok "Admin credentials confirmed"
 
 # 2) Parse targets
 TARGETS=()
 MODE="create"
 DO_LIST="no"
-for arg in "$@"; do
-  case "$arg" in
+PASSWORD="MyPass123"
+while [ $# -gt 0 ]; do
+  case "$1" in
     --list)
       DO_LIST="yes"
+      shift
       ;;
     --delete)
       MODE="delete"
+      shift
+      ;;
+    --password)
+      PASSWORD="${2:-}"
+      shift 2
+      ;;
+    --user)
+      if [ -z "${2:-}" ]; then
+        print_err "--user requires a name"
+        usage
+        exit 1
+      fi
+      TARGETS+=("$2")
+      shift 2
       ;;
     --newuser|--manager|--member)
-      TARGETS+=("${arg#--}")
+      TARGETS+=("${1#--}")
+      shift
       ;;
     *)
-      print_err "Unknown option: $arg"
+      print_err "Unknown option: $1"
       usage
       exit 1
       ;;
@@ -175,21 +196,29 @@ if [ ${#TARGETS[@]} -eq 0 ]; then
   TARGETS=("newuser" "manager" "member")
 fi
 
-if [ "$DO_LIST" = "yes" ]; then
-  if openstack user list; then
-    print_ok "User list completed"
-  else
-    print_err "Failed to list users"
-  fi
-  exit 0
-fi
-
 show_user_info() {
   local user="$1"
   local name id
   name=$(openstack user show -f value -c name "$user" 2>/dev/null) || return 1
   id=$(openstack user show -f value -c id "$user" 2>/dev/null) || return 1
   printf "name=%s id=%s" "$name" "$id"
+}
+
+write_openrc() {
+  local user="$1"
+  local password="$2"
+  local openrc_path="${ENVINFO_DIR}/${user}-openrc.sh"
+
+  mkdir -p "$ENVINFO_DIR"
+  cat <<EOF > "$openrc_path"
+export OS_USERNAME=$user
+export OS_PASSWORD=$password
+export OS_USER_DOMAIN_NAME=Default
+export OS_PROJECT_NAME=admin
+export OS_PROJECT_DOMAIN_NAME=Default
+export OS_AUTH_URL=http://127.0.0.1:5000/v3
+export OS_REGION_NAME=RegionOne
+EOF
 }
 
 create_user() {
@@ -203,8 +232,8 @@ create_user() {
   fi
 
   if info=$(show_user_info "$user"); then
-    print_exist "$info"
-    return 0
+    print_exist "User already exists: $info"
+    return 2
   fi
 
   create_output=$(openstack user create --domain "$domain" --password "$password" "$user" 2>&1)
@@ -216,8 +245,11 @@ create_user() {
 
   if info=$(show_user_info "$user"); then
     print_create "$info"
+    write_openrc "$user" "$password"
+    return 0
   else
     print_err "User created but failed to fetch info: $user"
+    return 1
   fi
 }
 
@@ -242,27 +274,44 @@ delete_user() {
   fi
 
   printf "[Delete] %s\n" "$info"
+  if [ -f "${ENVINFO_DIR}/${user}-openrc.sh" ]; then
+    rm -f "${ENVINFO_DIR}/${user}-openrc.sh"
+  fi
 }
 
+DID_MUTATE="no"
+
+if [ "$DO_LIST" = "yes" ]; then
+  if openstack user list; then
+    print_ok "User list completed"
+  else
+    print_err "Failed to list users"
+  fi
+else
 for user in "${TARGETS[@]}"; do
   echo "---- $user ----"
   if [ "$MODE" = "delete" ]; then
-    delete_user "$user"
+    if delete_user "$user"; then
+      DID_MUTATE="yes"
+    fi
   else
-    case "$user" in
-      newuser)
-        create_user "newuser" "MyPass123"
-        ;;
-      manager)
-        create_user "manager" "MyPass123"
-        ;;
-      member)
-        create_user "member" "MyPass123"
-        ;;
-    esac
+    create_user "$user" "$PASSWORD"
+    if [ $? -eq 0 ]; then
+      DID_MUTATE="yes"
+    fi
   fi
   echo ""
 done
+fi
 
 update_adminset
 print_ok "AdminSet.md updated"
+
+if [ "$DID_MUTATE" = "yes" ]; then
+  if python /root/Tools/RoleGrantInfo.py >/dev/null 2>&1; then
+    print_ok "Env info updated"
+  else
+    print_err "Failed to run /root/Tools/RoleGrantInfo.py"
+    python /root/Tools/RoleGrantInfo.py
+  fi
+fi

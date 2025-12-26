@@ -70,6 +70,13 @@ while [ $# -gt 0 ]; do
   esac
  done
 
+echo "[INFO] Current OS_* env:"
+env | grep '^OS_' || true
+if [ "${OS_USERNAME:-}" != "admin" ]; then
+  print_err "权限不足，需要切换admin"
+  exit 1
+fi
+
 if [ -z "$USER_NAME" ]; then
   print_err "Missing --user"
   usage
@@ -91,14 +98,7 @@ if [ "$DO_LIST" = "no" ] && [ -z "$MODE" ]; then
   exit 1
 fi
 
-# 1) Load admin credentials
-if ! source /opt/openstack/envinfo/admin-openrc.sh >/dev/null 2>&1; then
-  print_err "Failed to source /opt/openstack/envinfo/admin-openrc.sh"
-  exit 1
-fi
-print_ok "Admin credentials loaded"
-
-# 2) Grant or revoke role
+# 1) Grant or revoke role
 if [ "$DO_LIST" = "yes" ]; then
   if openstack role assignment list --user "$USER_NAME" --project "$PROJECT_NAME" --names; then
     print_ok "Role assignment list completed"
@@ -107,6 +107,10 @@ if [ "$DO_LIST" = "yes" ]; then
   fi
   exit 0
 elif [ "$MODE" = "add" ]; then
+  if [ "$USER_NAME" = "admin" ]; then
+    print_err "Refuse to grant role for admin"
+    exit 1
+  fi
   if openstack role assignment list --user "$USER_NAME" --project "$PROJECT_NAME" --names -f value -c Role 2>/dev/null | grep -qx "$ROLE_NAME"; then
     print_info "[Exist] role already granted"
   else
@@ -119,6 +123,10 @@ elif [ "$MODE" = "add" ]; then
     fi
   fi
 else
+  if [ "$USER_NAME" = "admin" ]; then
+    print_err "Refuse to revoke role for admin"
+    exit 1
+  fi
   if openstack role assignment list --user "$USER_NAME" --project "$PROJECT_NAME" --names -f value -c Role 2>/dev/null | grep -qx "$ROLE_NAME"; then
     if openstack role remove --user "$USER_NAME" --project "$PROJECT_NAME" "$ROLE_NAME" >/dev/null 2>&1; then
       print_ok "Role revoked"
@@ -132,10 +140,9 @@ else
   fi
 fi
 
-# 3) Update assistfile info
+# 3) Update EnvInfo after grant/revoke
 if python /root/Tools/RoleGrantInfo.py >/dev/null 2>&1; then
-  print_ok "RoleGrantInfo updated"
-  print_info "Updated: /root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv"
+  print_ok "Env info updated"
 else
   print_err "Failed to run /root/Tools/RoleGrantInfo.py"
   python /root/Tools/RoleGrantInfo.py

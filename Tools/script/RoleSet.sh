@@ -145,12 +145,14 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-# 1) Load admin credentials
-if ! source /opt/openstack/envinfo/admin-openrc.sh >/dev/null 2>&1; then
-  print_err "Failed to source /opt/openstack/envinfo/admin-openrc.sh"
+# 1) Check current OS_* env
+echo "[INFO] Current OS_* env:"
+env | grep '^OS_' || true
+if [ "${OS_USERNAME:-}" != "admin" ]; then
+  print_err "权限不足，需要切换admin"
   exit 1
 fi
-print_ok "Admin credentials loaded"
+print_ok "Admin credentials confirmed"
 
 # 2) Parse args
 ROLES=()
@@ -214,7 +216,7 @@ create_role() {
 
   if info=$(show_role_info "$role"); then
     print_exist "$info"
-    return 0
+    return 2
   fi
 
   create_output=$(openstack role create "$role" 2>&1)
@@ -226,9 +228,10 @@ create_role() {
 
   if info=$(show_role_info "$role"); then
     print_create "$info"
-  else
-    print_err "Role created but failed to fetch info: $role"
+    return 0
   fi
+  print_err "Role created but failed to fetch info: $role"
+  return 1
 }
 
 delete_role() {
@@ -252,17 +255,33 @@ delete_role() {
   fi
 
   print_delete "$info"
+  return 0
 }
 
+DID_MUTATE="no"
 for role in "${ROLES[@]}"; do
   echo "---- $role ----"
   if [ "$MODE" = "delete" ]; then
-    delete_role "$role"
+    if delete_role "$role"; then
+      DID_MUTATE="yes"
+    fi
   else
     create_role "$role"
+    if [ $? -eq 0 ]; then
+      DID_MUTATE="yes"
+    fi
   fi
   echo ""
 done
 
 update_adminset
 print_ok "AdminSet.md updated"
+
+if [ "$DID_MUTATE" = "yes" ]; then
+  if python /root/Tools/RoleGrantInfo.py >/dev/null 2>&1; then
+    print_ok "Env info updated"
+  else
+    print_err "Failed to run /root/Tools/RoleGrantInfo.py"
+    python /root/Tools/RoleGrantInfo.py
+  fi
+fi

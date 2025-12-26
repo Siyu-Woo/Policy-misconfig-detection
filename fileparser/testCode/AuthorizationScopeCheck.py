@@ -22,8 +22,11 @@ if str(ROOT_DIR) not in sys.path:
 DEFAULT_AUDIT_FILE = "/root/policy-fileparser/data/assistfile/rbac_audit_keystone.csv"
 DEFAULT_TEMP_FILE = "/root/policy-fileparser/data/assistfile/rbac_audit_keystone_temp.csv"
 DEFAULT_ROLEGRANT_FILE = "/root/policy-fileparser/data/assistfile/rolegrant.csv"
-DEFAULT_PROJECTINFO_FILE = "/root/policy-fileparser/data/assistfile/projectinfo.csv"
+DEFAULT_PROJECTINFO_FILE = (
+    "/root/policy-fileparser/data/assistfile/EnvInfo/projectinfo.csv"
+)
 FALLBACK_ROLEGRANT_FILE = "/root/policy-fileparser/data/assistfile/rolegrant.csv"
+FALLBACK_PROJECTINFO_FILE = "/root/policy-fileparser/data/assistfile/projectinfo.csv"
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,7 +133,10 @@ def load_audit_rows(paths: Iterable[str]) -> List[Dict[str, str]]:
 
 def load_project_map(path: str) -> Dict[str, str]:
     project_map: Dict[str, str] = {}
+    if not os.path.exists(path) and os.path.exists(FALLBACK_PROJECTINFO_FILE):
+        path = FALLBACK_PROJECTINFO_FILE
     if not os.path.exists(path):
+        print(f"⚠ projectinfo.csv 不存在: {path}")
         return project_map
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
